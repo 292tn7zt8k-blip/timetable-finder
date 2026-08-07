@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#ffffff">
-  <meta name="description" content="시간표를 올리고 친구들의 시간을 찾아보는 모바일 우선 시간표 공유 서비스">
+  <meta name="description" content="학생 인증 후 시간표를 공유하고 친구들의 수업과 공강을 찾는 서비스">
   <title>시간표 공유</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -14,7 +14,7 @@
       <div class="hero__inner">
         <p class="eyebrow">TIMETABLE SHARE</p>
         <h1 id="site-title">시간표 공유</h1>
-        <p class="hero__description">시간표를 올리고 친구들의 시간을 찾아보세요.</p>
+        <p class="hero__description">내 시간표를 등록한 뒤 친구들의 수업과 공강을 찾아보세요.</p>
       </div>
     </header>
 
@@ -25,38 +25,64 @@
             <p class="section-kicker">등록</p>
             <h2 id="register-title">내 시간표 등록</h2>
           </div>
-          <p>사진을 올린 뒤 분석 결과를 직접 확인하고 저장합니다.</p>
+          <p>학번·이름 확인 후 Microsoft 계정을 연결합니다.</p>
         </div>
 
-        <div class="card form-card">
-          <div class="field-group">
-            <label for="studentName">학생 이름</label>
-            <input id="studentName" name="studentName" type="text" maxlength="30" autocomplete="off" placeholder="예: 이강호" aria-describedby="nameHelp">
-            <p class="field-help" id="nameHelp">같은 이름으로 다시 저장하면 이전 시간표가 교체됩니다.</p>
+        <div class="card auth-card" id="identityCard">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">본인 확인</p>
+              <h3>학번과 이름 입력</h3>
+            </div>
           </div>
+          <div class="identity-grid">
+            <div class="field-group">
+              <label for="studentNo">학번</label>
+              <input id="studentNo" name="studentNo" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="예: 2214">
+            </div>
+            <div class="field-group">
+              <label for="studentName">이름</label>
+              <input id="studentName" name="studentName" type="text" maxlength="20" autocomplete="off" placeholder="예: 이강호">
+            </div>
+          </div>
+          <p class="field-help">명단 이름 끝에 A/B 같은 영문자가 있어도 영문자는 빼고 한글 이름만 입력하세요.</p>
+          <button class="button button--primary button--full" id="microsoftLoginBtn" type="button">Microsoft 계정으로 로그인하고 연결</button>
+          <p class="field-help">학교 계정이 아니어도 됩니다. 최초 연결한 동일한 Microsoft 계정으로만 이후 수정할 수 있습니다.</p>
+        </div>
 
+        <div class="card account-panel" id="accountPanel" hidden>
+          <div>
+            <p class="section-kicker">연결된 계정</p>
+            <h3 id="accountStudent">학생</h3>
+            <p id="accountEmail" class="field-help"></p>
+          </div>
+          <div class="account-actions">
+            <span class="quota-badge" id="analysisQuota">AI 분석 2회 남음</span>
+            <button class="button button--ghost" id="logoutBtn" type="button">로그아웃</button>
+          </div>
+        </div>
+
+        <div class="card form-card" id="registrationCard" hidden>
           <div class="field-group">
             <label for="scheduleImage">시간표 이미지</label>
             <input id="scheduleImage" name="scheduleImage" type="file" accept="image/*">
-            <p class="field-help">업로드한 시간표 이미지를 AI가 분석합니다. 분석 후 반드시 결과를 확인해주세요.</p>
+            <p class="field-help">AI 분석 요청은 학생당 최대 2회입니다. 첫 분석 뒤 두 번째 분석은 10분 후 가능합니다.</p>
           </div>
 
           <div class="image-preview" id="imagePreviewWrap" hidden>
             <img id="imagePreview" alt="선택한 시간표 이미지 미리보기">
           </div>
 
-          <button class="button button--primary button--full" id="analyzeBtn" type="button">시간표 분석</button>
+          <button class="button button--primary button--full" id="analyzeBtn" type="button">시간표 AI 분석</button>
         </div>
 
         <div class="card analysis-card" id="analysisPanel" hidden>
           <div class="notice" role="note">
-            <strong>AI 분석 결과를 확인하고 잘못된 부분을 수정해주세요.</strong>
-            <span>이미지 인식 결과는 틀릴 수 있습니다. 저장 전 모든 칸을 직접 확인하고 수정할 수 있습니다.</span>
+            <strong>분석 결과를 과목 목록에서 확인해주세요.</strong>
+            <span>과목은 직접 타이핑하지 않습니다. 미확인 칸이 있으면 드롭다운에서 실제 과목을 선택해야 저장할 수 있습니다.</span>
           </div>
-
           <div class="table-scroll" id="editableScheduleWrap" tabindex="0" aria-label="편집 가능한 시간표 표"></div>
-
-          <button class="button button--primary button--full" id="saveBtn" type="button">확인 후 저장</button>
+          <button class="button button--primary button--full" id="saveBtn" type="button">확인 후 시간표 저장</button>
         </div>
       </section>
 
@@ -66,70 +92,39 @@
             <p class="section-kicker">조회</p>
             <h2 id="lookup-title">시간표 조회</h2>
           </div>
-          <p>사람별 전체 시간표와 특정 요일·교시의 수업을 확인할 수 있습니다.</p>
+          <p>내 시간표 등록을 완료한 학생만 조회할 수 있습니다.</p>
         </div>
 
         <div class="lookup-grid">
           <article class="card">
-            <div class="card-heading">
-              <div>
-                <p class="section-kicker">사람별</p>
-                <h3>학생 찾기</h3>
-              </div>
-            </div>
-
+            <div class="card-heading"><div><p class="section-kicker">사람별</p><h3>학생 찾기</h3></div></div>
             <div class="field-group">
-              <label for="lookupSearch">이름 검색</label>
-              <input id="lookupSearch" type="search" placeholder="저장된 이름 검색" autocomplete="off">
+              <label for="lookupSearch">이름 또는 학번 검색</label>
+              <input id="lookupSearch" type="search" placeholder="이름 / 학번" autocomplete="off">
             </div>
-
             <div class="student-list" id="studentList" aria-live="polite"></div>
           </article>
 
           <article class="card">
-            <div class="card-heading">
-              <div>
-                <p class="section-kicker">시간별</p>
-                <h3>요일·교시 조회</h3>
-              </div>
-            </div>
-
+            <div class="card-heading"><div><p class="section-kicker">시간별</p><h3>요일·교시 조회</h3></div></div>
             <div class="selector-row">
-              <div class="field-group">
-                <label for="lookupDay">요일</label>
-                <select id="lookupDay"></select>
-              </div>
-              <div class="field-group">
-                <label for="lookupPeriod">교시</label>
-                <select id="lookupPeriod"></select>
-              </div>
+              <div class="field-group"><label for="lookupDay">요일</label><select id="lookupDay"></select></div>
+              <div class="field-group"><label for="lookupPeriod">교시</label><select id="lookupPeriod"></select></div>
             </div>
-
             <button class="button button--secondary button--full" id="timeLookupBtn" type="button">해당 시간 조회</button>
-            <p class="field-help">같은 시간의 학생을 과목별로 묶어서 보여줍니다. 이름을 누르면 전체 시간표를 볼 수 있습니다.</p>
             <div class="result-list result-list--spaced" id="timeLookupResults" aria-live="polite"></div>
           </article>
         </div>
 
         <article class="card schedule-detail" id="studentScheduleCard" hidden>
           <div class="card-heading card-heading--responsive">
-            <div>
-              <p class="section-kicker">전체 시간표</p>
-              <h3 id="selectedStudentTitle">학생 시간표</h3>
-            </div>
+            <div><p class="section-kicker">전체 시간표</p><h3 id="selectedStudentTitle">학생 시간표</h3></div>
             <p class="updated-text" id="selectedStudentUpdated"></p>
           </div>
-          <p class="schedule-click-hint">시간표의 과목 칸을 누르면 그 시간에 같은 수업을 듣는 친구를 확인할 수 있습니다.</p>
-          <div class="table-scroll" id="readonlyScheduleWrap" tabindex="0" aria-label="선택한 학생의 전체 시간표"></div>
-
+          <p class="schedule-click-hint">과목 칸을 누르면 같은 시간에 같은 수업을 듣는 친구를 볼 수 있습니다.</p>
+          <div class="table-scroll" id="readonlyScheduleWrap" tabindex="0"></div>
           <section class="classmate-panel" id="classmatePanel" aria-live="polite" hidden>
-            <div class="classmate-panel__heading">
-              <div>
-                <p class="section-kicker">같이 있는 친구</p>
-                <h4 id="classmateTitle">같이 듣는 친구</h4>
-              </div>
-              <span id="classmateMeta"></span>
-            </div>
+            <div class="classmate-panel__heading"><div><p class="section-kicker">같이 있는 친구</p><h4 id="classmateTitle">같이 듣는 친구</h4></div><span id="classmateMeta"></span></div>
             <div class="classmate-list" id="classmateList"></div>
           </section>
         </article>
@@ -137,49 +132,25 @@
 
       <section class="view" id="freeView" data-view="free" aria-labelledby="free-title" hidden>
         <div class="section-heading">
-          <div>
-            <p class="section-kicker">공강</p>
-            <h2 id="free-title">공강 찾기</h2>
-          </div>
-          <p>요일과 교시를 고르면 그 시간에 비어 있는 학생만 모아봅니다.</p>
+          <div><p class="section-kicker">공강</p><h2 id="free-title">공강 찾기</h2></div>
+          <p>요일과 교시를 고르면 그 시간에 공강인 학생만 모아봅니다.</p>
         </div>
-
         <article class="card">
           <div class="selector-row">
-            <div class="field-group">
-              <label for="freeDay">요일</label>
-              <select id="freeDay"></select>
-            </div>
-            <div class="field-group">
-              <label for="freePeriod">교시</label>
-              <select id="freePeriod"></select>
-            </div>
+            <div class="field-group"><label for="freeDay">요일</label><select id="freeDay"></select></div>
+            <div class="field-group"><label for="freePeriod">교시</label><select id="freePeriod"></select></div>
           </div>
-
           <button class="button button--primary button--full" id="freeLookupBtn" type="button">공강 학생 찾기</button>
-
-          <div class="free-summary" id="freeSummary" aria-live="polite">
-            <span>선택한 시간의 공강 인원</span>
-            <strong id="freeCount">0명</strong>
-          </div>
+          <div class="free-summary" id="freeSummary" aria-live="polite"><span>선택한 시간의 공강 인원</span><strong id="freeCount">0명</strong></div>
           <div class="result-list" id="freeResults" aria-live="polite"></div>
         </article>
       </section>
     </main>
 
     <nav class="bottom-nav" aria-label="주요 메뉴">
-      <button class="nav-button is-active" type="button" data-nav="register" aria-current="page">
-        <span class="nav-icon" aria-hidden="true">＋</span>
-        <span>시간표 등록</span>
-      </button>
-      <button class="nav-button" type="button" data-nav="lookup">
-        <span class="nav-icon" aria-hidden="true">⌕</span>
-        <span>시간표 조회</span>
-      </button>
-      <button class="nav-button" type="button" data-nav="free">
-        <span class="nav-icon" aria-hidden="true">○</span>
-        <span>공강 찾기</span>
-      </button>
+      <button class="nav-button is-active" type="button" data-nav="register" aria-current="page"><span class="nav-icon">＋</span><span>시간표 등록</span></button>
+      <button class="nav-button" type="button" data-nav="lookup" data-requires-registration="true" disabled><span class="nav-icon">⌕</span><span>시간표 조회</span></button>
+      <button class="nav-button" type="button" data-nav="free" data-requires-registration="true" disabled><span class="nav-icon">○</span><span>공강 찾기</span></button>
     </nav>
   </div>
 
@@ -191,6 +162,7 @@
       publishableKey: 'sb_publishable_Sr9zGqyzXGNX-PO8pmOMzw_Chuvp0s7'
     };
   </script>
-  <script src="app.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

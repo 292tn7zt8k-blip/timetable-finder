@@ -697,3 +697,84 @@ input::placeholder {
   font-size: 0.8rem;
   white-space: nowrap;
 }
+
+/* v3 authentication and canonical subject UI */
+.auth-card {
+  display: grid;
+  gap: 16px;
+}
+
+.identity-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px;
+}
+
+.account-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.account-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.quota-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: var(--primary-soft, #eef4ff);
+  color: var(--primary, #2563eb);
+  font-weight: 800;
+  font-size: 0.82rem;
+}
+
+.button--ghost {
+  border: 1px solid var(--border, #e4e7ec);
+  background: #fff;
+  color: var(--text, #111827);
+}
+
+.nav-button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.schedule-select {
+  width: 100%;
+  min-width: 132px;
+  min-height: 42px;
+  border: 1px solid var(--border, #e4e7ec);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text, #111827);
+  padding: 8px 30px 8px 9px;
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.schedule-select.is-unknown {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+@media (max-width: 640px) {
+  .identity-grid {
+    grid-template-columns: 1fr;
+  }
+  .account-panel {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .account-actions {
+    justify-content: flex-start;
+  }
+}
