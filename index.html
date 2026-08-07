@@ -38,7 +38,7 @@
           <div class="field-group">
             <label for="scheduleImage">시간표 이미지</label>
             <input id="scheduleImage" name="scheduleImage" type="file" accept="image/*">
-            <p class="field-help">이번 버전에서는 실제 AI 대신 데모 분석 결과를 보여줍니다.</p>
+            <p class="field-help">업로드한 시간표 이미지를 AI가 분석합니다. 분석 후 반드시 결과를 확인해주세요.</p>
           </div>
 
           <div class="image-preview" id="imagePreviewWrap" hidden>
@@ -51,7 +51,7 @@
         <div class="card analysis-card" id="analysisPanel" hidden>
           <div class="notice" role="note">
             <strong>AI 분석 결과를 확인하고 잘못된 부분을 수정해주세요.</strong>
-            <span>현재는 테스트용 데모 분석입니다. 모든 칸을 직접 수정할 수 있습니다.</span>
+            <span>이미지 인식 결과는 틀릴 수 있습니다. 저장 전 모든 칸을 직접 확인하고 수정할 수 있습니다.</span>
           </div>
 
           <div class="table-scroll" id="editableScheduleWrap" tabindex="0" aria-label="편집 가능한 시간표 표"></div>
@@ -106,6 +106,7 @@
             </div>
 
             <button class="button button--secondary button--full" id="timeLookupBtn" type="button">해당 시간 조회</button>
+            <p class="field-help">같은 시간의 학생을 과목별로 묶어서 보여줍니다. 이름을 누르면 전체 시간표를 볼 수 있습니다.</p>
             <div class="result-list result-list--spaced" id="timeLookupResults" aria-live="polite"></div>
           </article>
         </div>
@@ -118,7 +119,19 @@
             </div>
             <p class="updated-text" id="selectedStudentUpdated"></p>
           </div>
+          <p class="schedule-click-hint">시간표의 과목 칸을 누르면 그 시간에 같은 수업을 듣는 친구를 확인할 수 있습니다.</p>
           <div class="table-scroll" id="readonlyScheduleWrap" tabindex="0" aria-label="선택한 학생의 전체 시간표"></div>
+
+          <section class="classmate-panel" id="classmatePanel" aria-live="polite" hidden>
+            <div class="classmate-panel__heading">
+              <div>
+                <p class="section-kicker">같이 있는 친구</p>
+                <h4 id="classmateTitle">같이 듣는 친구</h4>
+              </div>
+              <span id="classmateMeta"></span>
+            </div>
+            <div class="classmate-list" id="classmateList"></div>
+          </section>
         </article>
       </section>
 

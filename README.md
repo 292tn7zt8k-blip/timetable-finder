@@ -8,11 +8,12 @@
 
 - 학생 이름 + 시간표 이미지 등록
 - 이미지 미리보기
-- 실제 AI 연결 전 데모 시간표 분석
+- 업로드한 실제 시간표 이미지를 Supabase Edge Function을 통해 AI 분석
 - 월~금, 1~7교시 과목명 직접 수정
 - 같은 이름으로 다시 저장하면 기존 시간표 교체
 - 모든 학생이 공유한 이름 검색 및 사람별 전체 시간표 조회
-- 특정 요일/교시의 모든 학생 과목 및 공강 조회
+- 특정 요일/교시의 학생을 과목별로 묶어 조회 (과목별 수강생 목록)
+- 개인 시간표의 과목 셀을 눌러 같은 시간·같은 과목을 듣는 친구 확인
 - 특정 요일/교시의 공강 학생만 조회하고 인원 수 표시
 - 조회/공강 화면 진입 시 공용 DB에서 최신 데이터 다시 동기화
 - 저장 성공/오류 토스트 및 버튼 로딩 상태
@@ -22,8 +23,10 @@
 
 - `index.html` — 화면 구조, 접근성 마크업, Supabase 공개 설정값
 - `style.css` — 모바일 우선 반응형 디자인
-- `app.js` — 데모 분석, Supabase 저장/조회, 사람별 조회 및 공강 찾기 로직
-- `README.md` — Supabase 및 GitHub Pages 설정 방법
+- `app.js` — 실제 이미지 분석 요청, Supabase 저장/조회, 과목별/사람별/공강 조회 로직
+- `supabase/functions/analyze-timetable/index.ts` — OpenAI API Key를 숨긴 서버 측 시간표 이미지 분석 함수
+- `supabase/config.toml` — Edge Function JWT 검증 설정
+- `README.md` — Supabase, AI 분석, GitHub Pages 설정 방법
 
 ---
 
@@ -161,33 +164,58 @@ Publishable Key는 브라우저에서 사용하는 공개용 키입니다. 실�
 
 ---
 
-# 현재 시간표 이미지 분석
+# 실제 시간표 이미지 AI 분석 설정
 
-현재 이미지 분석 버튼은 **데모 분석**입니다. 어떤 학생 이름을 입력해도 테스트할 수 있으며, 기본 데모 결과로 이강호 시간표가 표시됩니다. 사용자는 모든 셀을 수정한 후 실제 공용 DB에 저장할 수 있습니다.
-
-다음 단계에서 실제 이미지 분석을 연결할 때는 다음 구조를 권장합니다.
+이 버전은 더 이상 이강호 데모 시간표를 강제로 반환하지 않습니다. 브라우저에서 선택한 **실제 이미지 데이터**를 `analyze-timetable` Supabase Edge Function으로 보내고, Edge Function이 서버에서 OpenAI 이미지 분석 API를 호출합니다.
 
 ```text
-브라우저
+브라우저 (GitHub Pages)
   ↓ 시간표 이미지
-Supabase Edge Function 또는 별도 서버 API
-  ↓
-OpenAI 이미지 분석 API
-  ↓ 분석 결과만 반환
+Supabase Edge Function: analyze-timetable
+  ↓ 서버에만 저장된 OPENAI_API_KEY
+OpenAI 이미지 분석
+  ↓ 월~금 × 1~7교시 JSON
 브라우저에서 사용자 확인/수정
   ↓
 Supabase students 테이블 저장
 ```
 
-OpenAI API Key는 Edge Function/서버 환경 변수에만 저장하고 브라우저 JavaScript에는 넣지 않습니다.
+## 보안 원칙
+
+OpenAI API Key는 절대로 `index.html`이나 `app.js`에 넣지 않습니다. 키는 **Supabase Edge Function Secret**으로만 저장합니다.
+
+서버 함수는 허용 Origin 제한, 이미지 크기 제한, 간단한 요청 횟수 제한을 포함하고 이미지 자체는 DB에 저장하지 않습니다.
+
+## Edge Function 배포
+
+저장소의 다음 파일을 사용합니다.
+
+```text
+supabase/functions/analyze-timetable/index.ts
+supabase/config.toml
+```
+
+Supabase CLI를 사용할 경우:
+
+```bash
+supabase login
+supabase link --project-ref zqbsbqzxoqbqnirgalsm
+supabase secrets set OPENAI_API_KEY=본인의_OpenAI_API_Key
+supabase functions deploy analyze-timetable --no-verify-jwt
+```
+
+Supabase Dashboard에서 직접 만들 경우에도 함수 이름은 반드시 `analyze-timetable`으로 하고, `supabase/functions/analyze-timetable/index.ts` 내용을 붙여 넣습니다. 함수의 Secret/Environment Variables에 `OPENAI_API_KEY`를 추가합니다.
+
+> OpenAI API Key를 채팅, GitHub, JavaScript 파일에 붙여 넣지 마세요. Supabase의 서버 Secret 입력란에 직접 넣어야 합니다.
+
+분석 결과는 바로 저장하지 않고 사용자가 화면에서 확인하고 잘못된 셀을 수정한 뒤 `확인 후 저장`을 눌러야 Supabase에 저장됩니다.
 
 ---
 
 # 다음 단계 권장 기능
 
-1. 실제 시간표 이미지 AI 분석
-2. 이름 도용/수정 방지를 위한 간단한 수정 PIN 또는 로그인
-3. 관리자용 학생 삭제/정리 기능
-4. 학년/반 또는 그룹 필드
-5. 실시간 변경 감지를 위한 Supabase Realtime
-6. 데이터 백업 및 학기별 초기화
+1. 이름 도용/수정 방지를 위한 간단한 수정 PIN 또는 로그인
+2. 관리자용 학생 삭제/정리 기능
+3. 학년/반 또는 그룹 필드
+4. 실시간 변경 감지를 위한 Supabase Realtime
+5. 데이터 백업 및 학기별 초기화

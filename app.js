@@ -11,16 +11,6 @@ function normalizeName(value) {
   return allHangul ? parts.join('') : compact;
 }
 
-function createDemoSchedule() {
-  return {
-    월: ['스포츠 생활2', '생명과학 실험', '화학 실험', '화학 실험', '한국사2', '한국사2', '공강'],
-    화: ['고급 대수', '고급 대수', '고급 미적분', '고급 미적분', '물리학 실험', '화법과 언어', '화법과 언어'],
-    수: ['음악 감상과 비평', '음악 감상과 비평', '인공지능 일반', '고급 대수', '한국사2', '창체', '창체'],
-    목: ['생명과학 실험', '생명과학 실험', '스포츠 생활2', '스포츠 생활2', '인공지능 일반', '인공지능 일반', '공강'],
-    금: ['화학 실험', '물리학 실험', '물리학 실험', '화법과 언어', '음악 감상과 비평', '고급 미적분', '공강'],
-  };
-}
-
 function normalizeSchedule(schedule = {}) {
   return DAYS.reduce((result, day) => {
     const source = Array.isArray(schedule[day]) ? schedule[day] : [];
@@ -72,6 +62,48 @@ function getStudentsAt(students, day, period) {
 
 function findFreeStudents(students, day, period) {
   return getStudentsAt(students, day, period).filter((item) => item.isFree);
+}
+
+function normalizeSubjectForMatch(subject) {
+  const normalized = String(subject ?? '').trim().replace(/\s+/g, ' ');
+  return isFreeSubject(normalized) ? '공강' : normalized;
+}
+
+function groupStudentsBySubject(students, day, period) {
+  const groups = new Map();
+  getStudentsAt(students, day, period).forEach((item) => {
+    const subject = normalizeSubjectForMatch(item.subject);
+    if (!groups.has(subject)) groups.set(subject, []);
+    groups.get(subject).push(item.name);
+  });
+
+  return Array.from(groups, ([subject, names]) => ({
+    subject,
+    students: names.sort((a, b) => a.localeCompare(b, 'ko-KR')),
+    isFree: subject === '공강',
+  })).sort((a, b) => {
+    if (a.isFree !== b.isFree) return a.isFree ? 1 : -1;
+    return a.subject.localeCompare(b.subject, 'ko-KR');
+  });
+}
+
+function findClassmatesForCell(students, studentName, day, period) {
+  const normalizedName = normalizeName(studentName);
+  const rows = getStudentsAt(students, day, period);
+  const selected = rows.find((item) => item.name === normalizedName);
+  if (!selected) return null;
+
+  const subject = normalizeSubjectForMatch(selected.subject);
+  const names = rows
+    .filter((item) => normalizeSubjectForMatch(item.subject) === subject)
+    .map((item) => item.name)
+    .sort((a, b) => a.localeCompare(b, 'ko-KR'));
+
+  return {
+    subject,
+    students: names,
+    classmates: names.filter((name) => name !== normalizedName),
+  };
 }
 
 function upsertStudent(students, student) {
@@ -153,6 +185,43 @@ async function fetchStudentsFromSupabase(config, fetchImpl = fetch) {
     }));
 }
 
+async function analyzeScheduleImage(config, imageDataUrl, fetchImpl = fetch) {
+  const normalized = normalizeSupabaseConfig(config);
+  if (!isSupabaseConfigured(normalized)) {
+    throw new Error('Supabase 연결 정보가 설정되지 않았습니다.');
+  }
+  if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(String(imageDataUrl || ''))) {
+    throw new Error('분석할 이미지 데이터가 올바르지 않습니다.');
+  }
+
+  const response = await fetchImpl(`${normalized.url}/functions/v1/analyze-timetable`, {
+    method: 'POST',
+    headers: getSupabaseHeaders(normalized, {
+      'Content-Type': 'application/json',
+    }),
+    body: JSON.stringify({ image: imageDataUrl }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`시간표 이미지 분석에 실패했습니다: ${await readErrorMessage(response)}`);
+  }
+
+  const data = await response.json();
+  if (!data || !data.schedule || typeof data.schedule !== 'object') {
+    throw new Error('AI 분석 결과 형식이 올바르지 않습니다.');
+  }
+  return normalizeSchedule(data.schedule);
+}
+
+function fileToDataUrl(file, globalObj = window) {
+  return new Promise((resolve, reject) => {
+    const reader = new globalObj.FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('이미지 파일을 읽지 못했습니다.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 async function upsertStudentToSupabase(config, student, fetchImpl = fetch) {
   const normalized = normalizeSupabaseConfig(config);
   if (!isSupabaseConfigured(normalized)) {
@@ -204,6 +273,10 @@ function initApp(doc = document, globalObj = window) {
     selectedStudentTitle: doc.getElementById('selectedStudentTitle'),
     selectedStudentUpdated: doc.getElementById('selectedStudentUpdated'),
     readonlyScheduleWrap: doc.getElementById('readonlyScheduleWrap'),
+    classmatePanel: doc.getElementById('classmatePanel'),
+    classmateTitle: doc.getElementById('classmateTitle'),
+    classmateMeta: doc.getElementById('classmateMeta'),
+    classmateList: doc.getElementById('classmateList'),
     freeDay: doc.getElementById('freeDay'),
     freePeriod: doc.getElementById('freePeriod'),
     freeLookupBtn: doc.getElementById('freeLookupBtn'),
@@ -289,7 +362,7 @@ function initApp(doc = document, globalObj = window) {
     elements.imagePreviewWrap.hidden = false;
   });
 
-  elements.analyzeBtn.addEventListener('click', () => {
+  elements.analyzeBtn.addEventListener('click', async () => {
     const name = normalizeName(elements.studentName.value);
     if (!name) {
       showToast(elements, state, '학생 이름을 먼저 입력해주세요.', true);
@@ -305,15 +378,23 @@ function initApp(doc = document, globalObj = window) {
     }
 
     elements.studentName.value = name;
-    setButtonLoading(elements.analyzeBtn, true, '분석 중...');
+    setButtonLoading(elements.analyzeBtn, true, 'AI 분석 중...');
 
-    globalObj.setTimeout(() => {
-      state.draftSchedule = createDemoSchedule();
+    try {
+      const imageDataUrl = await fileToDataUrl(file, globalObj);
+      state.draftSchedule = await analyzeScheduleImage(
+        state.supabaseConfig,
+        imageDataUrl,
+        globalObj.fetch.bind(globalObj),
+      );
       renderEditableSchedule(doc, elements.editableScheduleWrap, state.draftSchedule);
       elements.analysisPanel.hidden = false;
-      setButtonLoading(elements.analyzeBtn, false);
       elements.analysisPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 450);
+    } catch (error) {
+      showToast(elements, state, humanizeAnalysisError(error), true);
+    } finally {
+      setButtonLoading(elements.analyzeBtn, false);
+    }
   });
 
   elements.saveBtn.addEventListener('click', async () => {
@@ -378,6 +459,20 @@ function initApp(doc = document, globalObj = window) {
   return state;
 }
 
+function humanizeAnalysisError(error) {
+  const message = String(error?.message || error || '알 수 없는 오류');
+  if (/404|not found|AI 키가 설정되지/i.test(message)) {
+    return '시간표 AI 분석 서버 설정이 아직 완료되지 않았습니다. 관리자 설정이 필요합니다.';
+  }
+  if (/Failed to fetch|NetworkError|Load failed/i.test(message)) {
+    return 'AI 분석 서버에 연결하지 못했습니다. 인터넷 연결을 확인해주세요.';
+  }
+  if (/413|too large|payload|용량이 너무/i.test(message)) {
+    return '이미지 용량이 너무 큽니다. 스크린샷이나 더 작은 이미지를 사용해주세요.';
+  }
+  return message.length > 160 ? '시간표 분석 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' : message;
+}
+
 function humanizeSupabaseError(error) {
   const message = String(error?.message || error || '알 수 없는 오류');
   if (/Failed to fetch|NetworkError|Load failed/i.test(message)) {
@@ -422,11 +517,11 @@ function renderEditableSchedule(doc, container, schedule) {
   container.replaceChildren(buildScheduleTable(doc, schedule, true));
 }
 
-function renderReadOnlySchedule(doc, container, schedule) {
-  container.replaceChildren(buildScheduleTable(doc, schedule, false));
+function renderReadOnlySchedule(doc, container, schedule, onCellClick) {
+  container.replaceChildren(buildScheduleTable(doc, schedule, false, onCellClick));
 }
 
-function buildScheduleTable(doc, schedule, editable) {
+function buildScheduleTable(doc, schedule, editable, onCellClick) {
   const normalized = normalizeSchedule(schedule);
   const table = doc.createElement('table');
   table.className = 'schedule-table';
@@ -471,7 +566,15 @@ function buildScheduleTable(doc, schedule, editable) {
       } else {
         const free = isFreeSubject(subject);
         td.className = `schedule-cell${free ? ' is-free' : ''}`;
-        td.textContent = free ? '공강' : subject;
+        const button = doc.createElement('button');
+        button.type = 'button';
+        button.className = 'schedule-cell-button';
+        button.textContent = free ? '공강' : subject;
+        button.setAttribute('aria-label', `${day}요일 ${period}교시 ${free ? '공강' : subject} 같이 있는 친구 보기`);
+        button.addEventListener('click', () => {
+          if (typeof onCellClick === 'function') onCellClick(day, period);
+        });
+        td.appendChild(button);
       }
       row.appendChild(td);
     });
@@ -538,7 +641,10 @@ function selectStudent(doc, elements, state, studentName, shouldScroll = true) {
   state.selectedStudentName = student.name;
   elements.selectedStudentTitle.textContent = `${student.name} 시간표`;
   elements.selectedStudentUpdated.textContent = student.updatedAt ? `마지막 저장: ${formatUpdatedAt(student.updatedAt)}` : '';
-  renderReadOnlySchedule(doc, elements.readonlyScheduleWrap, student.schedule);
+  renderReadOnlySchedule(doc, elements.readonlyScheduleWrap, student.schedule, (day, period) => {
+    renderClassmatesForCell(doc, elements, state, student.name, day, period);
+  });
+  if (elements.classmatePanel) elements.classmatePanel.hidden = true;
   elements.studentScheduleCard.hidden = false;
   if (shouldScroll) elements.studentScheduleCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -546,24 +652,74 @@ function selectStudent(doc, elements, state, studentName, shouldScroll = true) {
 function renderTimeLookup(doc, elements, state) {
   const day = elements.lookupDay.value || DAYS[0];
   const period = Number(elements.lookupPeriod.value || PERIODS[0]);
-  const rows = getStudentsAt(state.students, day, period);
+  const groups = groupStudentsBySubject(state.students, day, period);
   elements.timeLookupResults.replaceChildren();
 
-  if (!rows.length) {
+  if (!groups.length) {
     elements.timeLookupResults.appendChild(createEmptyState(doc, '공유된 학생이 없어 조회할 수 없습니다.'));
     return;
   }
 
-  rows.forEach((row) => {
-    const item = doc.createElement('div');
-    item.className = `result-item${row.isFree ? ' is-free' : ''}`;
-    const name = doc.createElement('strong');
-    name.textContent = row.name;
-    const subject = doc.createElement('span');
-    subject.textContent = `${day}요일 ${period}교시 · ${row.subject}`;
-    item.append(name, subject);
+  groups.forEach((group) => {
+    const item = doc.createElement('section');
+    item.className = `subject-group${group.isFree ? ' is-free' : ''}`;
+
+    const heading = doc.createElement('div');
+    heading.className = 'subject-group__heading';
+    const subject = doc.createElement('strong');
+    subject.textContent = group.subject;
+    const count = doc.createElement('span');
+    count.textContent = `${group.students.length}명`;
+    heading.append(subject, count);
+
+    const names = doc.createElement('div');
+    names.className = 'subject-group__students';
+    group.students.forEach((studentName) => {
+      const chip = doc.createElement('button');
+      chip.type = 'button';
+      chip.className = 'student-chip';
+      chip.textContent = studentName;
+      chip.setAttribute('aria-label', `${studentName} 전체 시간표 보기`);
+      chip.addEventListener('click', () => selectStudent(doc, elements, state, studentName));
+      names.appendChild(chip);
+    });
+
+    item.append(heading, names);
     elements.timeLookupResults.appendChild(item);
   });
+}
+
+function renderClassmatesForCell(doc, elements, state, studentName, day, period) {
+  const match = findClassmatesForCell(state.students, studentName, day, period);
+  if (!match || !elements.classmatePanel) return;
+
+  elements.classmateTitle.textContent = match.subject === '공강'
+    ? '같이 공강인 친구'
+    : `${match.subject} 같이 듣는 친구`;
+  elements.classmateMeta.textContent = `${day}요일 ${period}교시 · 전체 ${match.students.length}명`;
+  elements.classmateList.replaceChildren();
+
+  if (!match.classmates.length) {
+    elements.classmateList.appendChild(createEmptyState(
+      doc,
+      match.subject === '공강'
+        ? '이 시간에 같이 공강인 다른 친구가 없습니다.'
+        : '이 수업을 같이 듣는 다른 친구가 없습니다.',
+    ));
+  } else {
+    match.classmates.forEach((name) => {
+      const chip = doc.createElement('button');
+      chip.type = 'button';
+      chip.className = 'student-chip';
+      chip.textContent = name;
+      chip.setAttribute('aria-label', `${name} 전체 시간표 보기`);
+      chip.addEventListener('click', () => selectStudent(doc, elements, state, name));
+      elements.classmateList.appendChild(chip);
+    });
+  }
+
+  elements.classmatePanel.hidden = false;
+  elements.classmatePanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function renderFreeLookup(doc, elements, state) {
@@ -649,17 +805,20 @@ if (typeof module !== 'undefined' && module.exports) {
     DAYS,
     PERIODS,
     normalizeName,
-    createDemoSchedule,
     normalizeSchedule,
     isFreeSubject,
     validateStudentDraft,
     getStudentsAt,
     findFreeStudents,
+    groupStudentsBySubject,
+    findClassmatesForCell,
     upsertStudent,
     normalizeSupabaseConfig,
     isSupabaseConfigured,
     fetchStudentsFromSupabase,
+    analyzeScheduleImage,
     upsertStudentToSupabase,
+    humanizeAnalysisError,
     humanizeSupabaseError,
     initApp,
   };
