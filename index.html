@@ -25,7 +25,7 @@
             <p class="section-kicker">등록</p>
             <h2 id="register-title">내 시간표 등록</h2>
           </div>
-          <p>학번·이름 확인 후 Microsoft 계정을 연결합니다.</p>
+          <p>학번·이름을 확인하고 6자리 PIN으로 내 시간표를 보호합니다.</p>
         </div>
 
         <div class="card auth-card" id="identityCard">
@@ -46,15 +46,30 @@
             </div>
           </div>
           <p class="field-help">명단 이름 끝에 A/B 같은 영문자가 있어도 영문자는 빼고 한글 이름만 입력하세요.</p>
-          <button class="button button--primary button--full" id="microsoftLoginBtn" type="button">Microsoft 계정으로 로그인하고 연결</button>
-          <p class="field-help">학교 계정이 아니어도 됩니다. 최초 연결한 동일한 Microsoft 계정으로만 이후 수정할 수 있습니다.</p>
+          <button class="button button--primary button--full" id="identityCheckBtn" type="button">학번·이름 확인</button>
+        </div>
+
+        <div class="card auth-card" id="pinCard" hidden>
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">PIN</p>
+              <h3 id="pinTitle">6자리 PIN 설정</h3>
+            </div>
+          </div>
+          <div class="field-group">
+            <label for="pinInput">6자리 숫자 PIN</label>
+            <input id="pinInput" name="pinInput" type="password" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="예: 482731">
+            <p class="field-help" id="pinHelp">PIN은 서버에 암호화된 해시로만 저장됩니다. 잊어버리면 관리자 초기화가 필요합니다.</p>
+          </div>
+          <button class="button button--primary button--full" id="pinActionBtn" type="button">PIN 설정하고 시작</button>
+          <button class="button button--ghost button--full" id="backToIdentityBtn" type="button">학번·이름 다시 입력</button>
         </div>
 
         <div class="card account-panel" id="accountPanel" hidden>
           <div>
-            <p class="section-kicker">연결된 계정</p>
+            <p class="section-kicker">로그인됨</p>
             <h3 id="accountStudent">학생</h3>
-            <p id="accountEmail" class="field-help"></p>
+            <p class="field-help">이 기기에서는 30일 동안 로그인 상태가 유지됩니다.</p>
           </div>
           <div class="account-actions">
             <span class="quota-badge" id="analysisQuota">AI 분석 2회 남음</span>
@@ -162,7 +177,6 @@
       publishableKey: 'sb_publishable_Sr9zGqyzXGNX-PO8pmOMzw_Chuvp0s7'
     };
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>
