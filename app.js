@@ -1240,37 +1240,36 @@ async function uploadChatImage(file) {
   return String(data.path);
 }
 
+function isChatNearBottom(threshold = 120) {
+  const viewport = elements.chatMessages;
+  if (!viewport) return true;
+  return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= threshold;
+}
+
+function scrollChatToBottom() {
+  const viewport = elements.chatMessages;
+  if (!viewport) return;
+  viewport.scrollTop = viewport.scrollHeight;
+}
+
 async function loadChatImage(imagePath, img) {
   if (!imagePath || !img || !state.activeThreadId) return;
-
   const cached = state.chatImageUrls.get(imagePath);
   if (cached) {
     img.src = cached;
     return;
   }
-
   try {
     const response = await chatMediaRequest({
       action: 'signed_url',
       thread_id: state.activeThreadId,
       path: imagePath,
     });
-
     const data = await response.json();
     const signedUrl = data?.signedUrl || data?.signed_url || data?.url || '';
     if (!signedUrl) throw new Error('SIGNED_URL_MISSING');
-
     state.chatImageUrls.set(imagePath, signedUrl);
-    img.classList.remove('is-error');
-    img.alt = '채팅으로 보낸 사진';
     img.src = signedUrl;
-
-    img.onerror = () => {
-      state.chatImageUrls.delete(imagePath);
-      img.removeAttribute('src');
-      img.alt = '사진을 불러오지 못했습니다.';
-      img.classList.add('is-error');
-    };
   } catch (error) {
     console.error('CHAT_IMAGE_LOAD_FAILED', imagePath, error);
     state.chatImageUrls.delete(imagePath);
@@ -1296,6 +1295,7 @@ function closeChatImageLightbox() {
 
 function renderChatRoom() {
   if (!state.activeChatPeer) return;
+  const stickToBottom = isChatNearBottom();
   elements.chatPeerTitle.textContent = `${state.activeChatPeer.name} (${state.activeChatPeer.studentNo})`;
   elements.chatMessages.replaceChildren();
   const otherReadId = Number(state.chatMessages.at(-1)?.other_last_read_message_id || 0);
@@ -1312,6 +1312,13 @@ function renderChatRoom() {
       image.className = 'chat-image-message';
       image.alt = '채팅으로 보낸 사진';
       image.loading = 'lazy';
+      image.dataset.stickToBottom = stickToBottom ? '1' : '0';
+      image.addEventListener('load', () => {
+        image.classList.add('is-loaded');
+        if (image.dataset.stickToBottom === '1') {
+          requestAnimationFrame(scrollChatToBottom);
+        }
+      }, { once: true });
       image.addEventListener('click', () => { if (image.src) openChatImageLightbox(image.src); });
       bubble.appendChild(image);
       loadChatImage(String(message.image_path), image);
@@ -1333,7 +1340,7 @@ function renderChatRoom() {
   elements.chatSendBtn.disabled = state.chatBlocked;
   if (elements.chatPhotoBtn) elements.chatPhotoBtn.disabled = state.chatBlocked;
   elements.chatBlockBtn.textContent = state.chatBlocked ? '차단 해제' : '차단';
-  requestAnimationFrame(() => { elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight; });
+  if (stickToBottom) requestAnimationFrame(scrollChatToBottom);
 }
 
 async function sendChatMessage() {

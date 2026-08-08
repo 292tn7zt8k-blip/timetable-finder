@@ -969,7 +969,7 @@ input::placeholder {
 .chat-room__tools { display:flex; gap:7px; flex-wrap:wrap; justify-content:flex-end; }
 .chat-tool-btn { min-height:38px; padding:0 11px; font-size:.78rem; }
 .chat-read-status { margin:5px 0 0; color:var(--muted); font-size:.78rem; }
-.chat-messages { min-height:360px; max-height:58vh; overflow:auto; padding:12px 4px; display:flex; flex-direction:column; gap:8px; background:#f8fafc; border-radius:14px; }
+.chat-messages { min-height:360px; max-height:58vh; overflow:auto; overflow-anchor:none; padding:12px 4px; display:flex; flex-direction:column; gap:8px; background:#f8fafc; border-radius:14px; }
 .chat-message-row { display:flex; flex-direction:column; max-width:82%; }
 .chat-message-row.is-mine { align-self:flex-end; align-items:flex-end; }
 .chat-message-row.is-other { align-self:flex-start; align-items:flex-start; }
@@ -1081,6 +1081,7 @@ input::placeholder {
   display: block;
   width: min(68vw, 360px);
   max-width: 100%;
+  aspect-ratio: 4 / 3;
   max-height: 440px;
   border-radius: 16px;
   object-fit: cover;
@@ -1205,4 +1206,12 @@ body.is-lightbox-open { overflow: hidden; }
   border-radius: 14px;
   background: #f0f1f3;
   color: #111827;
+}
+
+
+/* Prevent Safari scroll anchoring from jumping when chat photos finish loading. */
+.chat-message-row,
+.chat-bubble,
+.chat-image-message {
+  overflow-anchor: none;
 }
