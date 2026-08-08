@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#ffffff">
   <meta name="description" content="학생 인증 후 시간표를 공유하고 친구들의 수업과 공강을 찾는 서비스">
   <title>시간표 공유</title>
-  <link rel="stylesheet" href="style.css?v=20260808-1450">
+  <link rel="stylesheet" href="style.css?v=20260808-1600">
 </head>
 <body>
   <div class="site-shell">
@@ -170,8 +170,45 @@
             <span id="friendSharedMeta">0개 과목</span>
           </div>
           <div class="friend-shared-classes" id="friendSharedClasses"></div>
-          <button class="button button--secondary button--full" id="friendFullScheduleBtn" type="button">전체 시간표 보기</button>
+          <div class="friend-detail-actions">
+            <button class="button button--primary button--full" id="friendChatBtn" type="button">1:1 채팅하기</button>
+            <button class="button button--secondary button--full" id="friendFullScheduleBtn" type="button">전체 시간표 보기</button>
+          </div>
         </article>
+      </section>
+
+      <section class="view" id="chatView" data-view="chat" aria-labelledby="chat-title" hidden>
+        <div class="section-heading">
+          <div><p class="section-kicker">메시지</p><h2 id="chat-title">1:1 채팅</h2></div>
+          <p>시간표를 등록한 학생끼리만 대화할 수 있습니다. 메시지는 최근 30일만 보관됩니다.</p>
+        </div>
+
+        <div class="chat-layout">
+          <article class="card chat-thread-card" id="chatThreadCard">
+            <div class="card-heading"><div><p class="section-kicker">최근 대화</p><h3>채팅 목록</h3></div></div>
+            <div class="chat-thread-list" id="chatThreadList" aria-live="polite"></div>
+          </article>
+
+          <article class="card chat-room" id="chatRoom" hidden>
+            <div class="chat-room__header">
+              <div>
+                <p class="section-kicker">1:1 채팅</p>
+                <h3 id="chatPeerTitle">친구</h3>
+                <p class="chat-read-status" id="chatReadStatus"></p>
+              </div>
+              <div class="chat-room__tools">
+                <button class="button button--ghost chat-tool-btn" id="chatBlockBtn" type="button">차단</button>
+                <button class="button button--ghost chat-tool-btn" id="chatReportBtn" type="button">신고</button>
+              </div>
+            </div>
+            <div class="chat-messages" id="chatMessages" aria-live="polite"></div>
+            <div class="chat-block-notice" id="chatBlockNotice" hidden>차단된 대화입니다. 차단을 해제해야 메시지를 보낼 수 있습니다.</div>
+            <div class="chat-composer">
+              <textarea id="chatInput" maxlength="500" rows="2" placeholder="메시지를 입력하세요 (최대 500자)"></textarea>
+              <button class="button button--primary" id="chatSendBtn" type="button">보내기</button>
+            </div>
+          </article>
+        </div>
       </section>
     </main>
 
@@ -179,6 +216,7 @@
       <button class="nav-button is-active" type="button" data-nav="register" aria-current="page"><span class="nav-icon">＋</span><span>시간표 등록</span></button>
       <button class="nav-button" type="button" data-nav="lookup" data-requires-registration="true" disabled><span class="nav-icon">⌕</span><span>시간표 조회</span></button>
       <button class="nav-button" type="button" data-nav="classmates" data-requires-registration="true" disabled><span class="nav-icon">◎</span><span>같이 듣는 친구</span></button>
+      <button class="nav-button" type="button" data-nav="chat" data-requires-registration="true" disabled><span class="nav-icon">✉</span><span>채팅</span><span class="nav-unread-badge" id="chatNavUnread" hidden>0</span></button>
     </nav>
   </div>
 
@@ -190,6 +228,6 @@
       publishableKey: 'sb_publishable_Sr9zGqyzXGNX-PO8pmOMzw_Chuvp0s7'
     };
   </script>
-  <script type="module" src="app.js?v=20260808-1450"></script>
+  <script type="module" src="app.js?v=20260808-1600"></script>
 </body>
 </html>

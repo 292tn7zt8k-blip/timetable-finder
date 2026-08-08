@@ -13,7 +13,10 @@ import {
   findMyClassmatesBySubject,
   findSharedClassesWithStudent,
   searchRosterStudents,
-} from './core.js?v=20260808-1450';
+  formatRelativeReadAt,
+  formatChatListTime,
+  isChatMessageUnread,
+} from './core.js?v=20260808-1600';
 
 const SESSION_KEY = 'timetableSessionToken';
 const COOLDOWN_MS = 10 * 60 * 1000;
@@ -63,6 +66,18 @@ const elements = {
   friendSharedMeta: document.getElementById('friendSharedMeta'),
   friendSharedClasses: document.getElementById('friendSharedClasses'),
   friendFullScheduleBtn: document.getElementById('friendFullScheduleBtn'),
+  friendChatBtn: document.getElementById('friendChatBtn'),
+  chatThreadList: document.getElementById('chatThreadList'),
+  chatRoom: document.getElementById('chatRoom'),
+  chatPeerTitle: document.getElementById('chatPeerTitle'),
+  chatReadStatus: document.getElementById('chatReadStatus'),
+  chatMessages: document.getElementById('chatMessages'),
+  chatInput: document.getElementById('chatInput'),
+  chatSendBtn: document.getElementById('chatSendBtn'),
+  chatBlockBtn: document.getElementById('chatBlockBtn'),
+  chatReportBtn: document.getElementById('chatReportBtn'),
+  chatBlockNotice: document.getElementById('chatBlockNotice'),
+  chatNavUnread: document.getElementById('chatNavUnread'),
   toast: document.getElementById('toast'),
 };
 
@@ -82,6 +97,13 @@ const state = {
   previewUrl: '',
   toastTimer: null,
   selectedClassmateNo: '',
+  chatThreads: [],
+  chatMessages: [],
+  activeThreadId: 0,
+  activeChatPeer: null,
+  chatBlocked: false,
+  chatThreadTimer: null,
+  chatRoomTimer: null,
 };
 
 fillSelect(elements.lookupDay, DAYS, (day) => `${day}요일`);
@@ -137,6 +159,8 @@ function bindEvents() {
       switchView(button.dataset.nav);
       if (button.dataset.nav === 'lookup') await refreshStudents();
       if (button.dataset.nav === 'classmates') await refreshClassmateData();
+      if (button.dataset.nav === 'chat') await enterChatView();
+      else stopChatPolling();
     });
   });
 
@@ -153,6 +177,11 @@ function bindEvents() {
     if (event.key === 'Enter') submitPin();
   });
   elements.logoutBtn.addEventListener('click', logout);
+  elements.friendChatBtn.addEventListener('click', startChatFromFriend);
+  elements.chatSendBtn.addEventListener('click', sendChatMessage);
+  elements.chatInput.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendChatMessage(); } });
+  elements.chatBlockBtn.addEventListener('click', toggleChatBlock);
+  elements.chatReportBtn.addEventListener('click', reportChatUser);
   elements.friendFullScheduleBtn.addEventListener('click', () => {
     if (!state.selectedClassmateNo) return;
     const targetNo = state.selectedClassmateNo;
@@ -294,6 +323,8 @@ function clearSession() {
   state.draftSchedule = null;
   state.selectedStudentNo = '';
   state.selectedClassmateNo = '';
+  stopChatPolling();
+  state.chatThreads = []; state.chatMessages = []; state.activeThreadId = 0; state.activeChatPeer = null;
   if (elements.friendSharedPanel) elements.friendSharedPanel.hidden = true;
 }
 
@@ -902,8 +933,167 @@ function renderFriendSharedClasses(studentNo) {
   }
 
   elements.friendFullScheduleBtn.textContent = `${friend.name} 전체 시간표 보기`;
+  elements.friendChatBtn.textContent = `${friend.name}님과 1:1 채팅`;
+  elements.friendChatBtn.disabled = false;
   elements.friendSharedPanel.hidden = false;
   elements.friendSharedPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+
+async function startChatFromFriend() {
+  if (!state.selectedClassmateNo) return;
+  try {
+    await openChatWithStudent(state.selectedClassmateNo);
+    switchView('chat');
+    startChatPolling();
+  } catch (error) { showToast(humanizeError(error), true); }
+}
+
+async function enterChatView() {
+  await loadChatThreads();
+  startChatPolling();
+}
+
+function stopChatPolling() {
+  if (state.chatThreadTimer) clearInterval(state.chatThreadTimer);
+  if (state.chatRoomTimer) clearInterval(state.chatRoomTimer);
+  state.chatThreadTimer = null;
+  state.chatRoomTimer = null;
+}
+
+function startChatPolling() {
+  stopChatPolling();
+  state.chatThreadTimer = setInterval(() => loadChatThreads(true), 5000);
+  if (state.activeThreadId) state.chatRoomTimer = setInterval(() => loadChatMessages(true), 3000);
+}
+
+async function loadChatThreads(silent = false) {
+  if (!state.sessionToken || !state.profile?.registered) return;
+  try {
+    const data = await rpc('chat_list_threads', { p_session_token: state.sessionToken });
+    state.chatThreads = Array.isArray(data) ? data : [];
+    renderChatThreads();
+  } catch (error) { if (!silent) showToast(humanizeError(error), true); }
+}
+
+function renderChatThreads() {
+  elements.chatThreadList.replaceChildren();
+  const totalUnread = state.chatThreads.reduce((sum, row) => sum + Number(row.unread_count || 0), 0);
+  elements.chatNavUnread.textContent = String(totalUnread);
+  elements.chatNavUnread.hidden = totalUnread <= 0;
+  if (!state.chatThreads.length) {
+    elements.chatThreadList.appendChild(createEmptyState('아직 대화가 없습니다. 같이 듣는 친구에서 채팅을 시작해보세요.'));
+    return;
+  }
+  for (const row of state.chatThreads) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `chat-thread${Number(row.thread_id) === state.activeThreadId ? ' is-active' : ''}`;
+    const body = document.createElement('div');
+    body.className = 'chat-thread__body';
+    const top = document.createElement('div'); top.className = 'chat-thread__top';
+    const name = document.createElement('strong'); name.textContent = `${row.other_name} (${row.other_student_no})`;
+    const time = document.createElement('span'); time.textContent = formatChatListTime(row.last_message_at);
+    top.append(name,time);
+    const preview = document.createElement('span'); preview.className='chat-thread__preview'; preview.textContent = row.last_message || '대화를 시작해보세요.';
+    body.append(top,preview);
+    if (Number(row.unread_count || 0) > 0) {
+      const badge = document.createElement('span'); badge.className='chat-unread-count'; badge.textContent=String(row.unread_count); button.append(body,badge);
+    } else button.append(body);
+    button.addEventListener('click', () => openExistingChat(row));
+    elements.chatThreadList.appendChild(button);
+  }
+}
+
+async function openChatWithStudent(studentNo) {
+  const row = firstRow(await rpc('chat_start_or_open', { p_session_token: state.sessionToken, p_other_student_no: String(studentNo) }));
+  if (!row) throw new Error('CHAT_NOT_FOUND');
+  state.activeThreadId = Number(row.thread_id);
+  state.activeChatPeer = { studentNo: String(row.other_student_no), name: String(row.other_name) };
+  state.chatBlocked = Boolean(row.blocked);
+  elements.chatRoom.hidden = false;
+  await loadChatMessages();
+  await loadChatThreads(true);
+  startChatPolling();
+}
+
+async function openExistingChat(row) {
+  state.activeThreadId = Number(row.thread_id);
+  state.activeChatPeer = { studentNo: String(row.other_student_no), name: String(row.other_name) };
+  state.chatBlocked = Boolean(row.blocked);
+  elements.chatRoom.hidden = false;
+  await loadChatMessages();
+  startChatPolling();
+}
+
+async function loadChatMessages(silent = false) {
+  if (!state.activeThreadId) return;
+  try {
+    const data = await rpc('chat_list_messages', { p_session_token: state.sessionToken, p_thread_id: state.activeThreadId });
+    state.chatMessages = Array.isArray(data) ? data : [];
+    if (state.chatMessages.length) state.chatBlocked = Boolean(state.chatMessages[0].blocked);
+    renderChatRoom();
+    await rpc('chat_mark_read', { p_session_token: state.sessionToken, p_thread_id: state.activeThreadId });
+    if (!silent) await loadChatThreads(true);
+  } catch (error) { if (!silent) showToast(humanizeError(error), true); }
+}
+
+function renderChatRoom() {
+  if (!state.activeChatPeer) return;
+  elements.chatPeerTitle.textContent = `${state.activeChatPeer.name} (${state.activeChatPeer.studentNo})`;
+  elements.chatMessages.replaceChildren();
+  const otherReadId = Number(state.chatMessages.at(-1)?.other_last_read_message_id || 0);
+  const otherReadAt = state.chatMessages.at(-1)?.other_last_read_at || null;
+  elements.chatReadStatus.textContent = formatRelativeReadAt(otherReadAt);
+  for (const message of state.chatMessages) {
+    const mine = String(message.sender_student_no) === String(state.profile.student_no);
+    const row = document.createElement('div'); row.className = `chat-message-row ${mine ? 'is-mine' : 'is-other'}`;
+    const bubble = document.createElement('div'); bubble.className='chat-bubble'; bubble.textContent=message.body;
+    const meta = document.createElement('div'); meta.className='chat-message-meta';
+    const time = document.createElement('span'); time.textContent = new Intl.DateTimeFormat('ko-KR',{hour:'2-digit',minute:'2-digit'}).format(new Date(message.created_at));
+    meta.appendChild(time);
+    if (isChatMessageUnread(message, otherReadId, state.profile.student_no)) { const unread=document.createElement('span'); unread.className='chat-message-unread'; unread.textContent='1'; meta.prepend(unread); }
+    row.append(bubble,meta); elements.chatMessages.appendChild(row);
+  }
+  elements.chatBlockNotice.hidden = !state.chatBlocked;
+  elements.chatInput.disabled = state.chatBlocked;
+  elements.chatSendBtn.disabled = state.chatBlocked;
+  elements.chatBlockBtn.textContent = state.chatBlocked ? '차단 해제' : '차단';
+  requestAnimationFrame(() => { elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight; });
+}
+
+async function sendChatMessage() {
+  const body = String(elements.chatInput.value || '').trim();
+  if (!state.activeThreadId || !body) return;
+  if (body.length > 500) { showToast('메시지는 최대 500자입니다.', true); return; }
+  setButtonLoading(elements.chatSendBtn,true,'전송 중...');
+  try {
+    await rpc('chat_send_message',{p_session_token:state.sessionToken,p_thread_id:state.activeThreadId,p_body:body});
+    elements.chatInput.value='';
+    await loadChatMessages();
+  } catch(error){ showToast(humanizeError(error),true); }
+  finally { setButtonLoading(elements.chatSendBtn,false); if(state.chatBlocked) elements.chatSendBtn.disabled=true; }
+}
+
+async function toggleChatBlock() {
+  if (!state.activeChatPeer) return;
+  const wasBlocked = state.chatBlocked;
+  try {
+    await rpc(wasBlocked ? 'chat_unblock_student' : 'chat_block_student',{p_session_token:state.sessionToken,p_other_student_no:state.activeChatPeer.studentNo});
+    state.chatBlocked = !wasBlocked;
+    renderChatRoom();
+    showToast(state.chatBlocked ? '상대를 차단했습니다.' : '차단을 해제했습니다.');
+  } catch(error){ showToast(humanizeError(error),true); }
+}
+
+async function reportChatUser() {
+  if (!state.activeThreadId || !state.activeChatPeer) return;
+  const reason = window.prompt(`${state.activeChatPeer.name}님을 신고하는 이유를 입력해주세요.`, '부적절한 메시지');
+  if (!reason?.trim()) return;
+  try {
+    await rpc('chat_report_student',{p_session_token:state.sessionToken,p_thread_id:state.activeThreadId,p_reason:reason.trim()});
+    showToast('신고가 접수됐습니다. 상대방에게는 신고 사실이 표시되지 않습니다.');
+  } catch(error){ showToast(humanizeError(error),true); }
 }
 
 function switchView(viewName) {
@@ -972,6 +1162,12 @@ function humanizeError(error) {
   if (/ANALYSIS_IN_PROGRESS/.test(message)) return '이미 분석 중입니다. 잠시 후 다시 시도해주세요.';
   if (/INVALID_SUBJECT|UNKNOWN/.test(message)) return '미확인 과목이 있습니다. 과목 목록에서 다시 선택해주세요.';
   if (/ANALYSIS_REQUIRED/.test(message)) return '시간표를 한 번 AI 분석한 뒤 저장할 수 있습니다.';
+  if (/CHAT_TARGET_NOT_REGISTERED/.test(message)) return '상대가 아직 시간표를 등록하지 않아 채팅할 수 없습니다.';
+  if (/CHAT_BLOCKED/.test(message)) return '차단된 상대와는 메시지를 주고받을 수 없습니다.';
+  if (/CHAT_RATE_LIMIT/.test(message)) return '메시지를 너무 빠르게 보내고 있습니다. 잠시 후 다시 보내주세요.';
+  if (/CHAT_MESSAGE_TOO_LONG/.test(message)) return '메시지는 최대 500자입니다.';
+  if (/CHAT_FORBIDDEN|CHAT_NOT_FOUND/.test(message)) return '이 대화에 접근할 수 없습니다.';
+  if (/REGISTRATION_REQUIRED/.test(message)) return '시간표를 먼저 등록해야 채팅할 수 있습니다.';
   if (/Failed to fetch|NetworkError|Load failed/i.test(message)) return '서버에 연결하지 못했습니다. 인터넷 연결을 확인해주세요.';
   return message.length > 180 ? '처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' : message;
 }

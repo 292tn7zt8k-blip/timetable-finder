@@ -220,3 +220,36 @@ export function searchRosterStudents(roster, query, ownStudentNo = '') {
     .slice(0, 30);
 }
 
+
+export function formatRelativeReadAt(value, now = new Date()) {
+  if (!value) return '';
+  const date = new Date(value);
+  const current = now instanceof Date ? now : new Date(now);
+  const diffMs = current.getTime() - date.getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return '';
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return '방금 읽음';
+  if (minutes < 60) return `${minutes}분 전 읽음`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}시간 전 읽음`;
+  if (hours < 48) return '어제 읽음';
+  return `${date.getMonth() + 1}월 ${date.getDate()}일 읽음`;
+}
+
+export function formatChatListTime(value, now = new Date()) {
+  if (!value) return '';
+  const date = new Date(value);
+  const current = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(date.getTime())) return '';
+  if (date.toDateString() === current.toDateString()) {
+    return new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(date);
+  }
+  return new Intl.DateTimeFormat('ko-KR', { month: 'numeric', day: 'numeric' }).format(date);
+}
+
+export function isChatMessageUnread(message, otherReadMessageId, myStudentNo) {
+  const sender = String(message?.sender_student_no ?? message?.senderStudentNo ?? '').trim();
+  const id = Number(message?.id || 0);
+  const readId = Number(otherReadMessageId || 0);
+  return sender === String(myStudentNo ?? '').trim() && id > readId;
+}
