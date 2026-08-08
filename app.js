@@ -854,6 +854,17 @@ function getCanonicalClassroomsForSlot(subjectId, day, period, preferredRooms = 
     return preferred;
   }
 
+  // 시간별 조회에서도 "같이 듣는 친구"와 동일하게 내 시간표의
+  // 해당 요일·교시·과목 교실을 최우선 기준으로 사용한다.
+  const me = state.students.find((student) => student.studentNo === String(state.profile?.student_no || ''));
+  if (me) {
+    const mySchedule = normalizeScheduleIds(me.schedule);
+    const myRooms = normalizeClassrooms(me.classrooms);
+    if (mySchedule[day][periodIndex] === wanted && myRooms[day][periodIndex].length) {
+      return myRooms[day][periodIndex];
+    }
+  }
+
   const counts = new Map();
 
   for (const student of state.students) {
@@ -1353,6 +1364,7 @@ async function createGroupChat() {
 }
 
 function renderGroupInvites() {
+  if (!elements.groupInviteInbox) return;
   elements.groupInviteInbox.replaceChildren();
   elements.groupInviteInbox.hidden = !state.groupInvites.length;
   for (const invite of state.groupInvites) {
@@ -1418,7 +1430,9 @@ async function loadChatThreads(silent = false) {
         state.activeGroupName = String(activeRoom.group_name);
         if (!elements.chatRoom.hidden) {
           elements.chatPeerTitle.textContent = state.activeGroupName;
-          if (!elements.groupInfoModal.hidden) elements.groupRenameInput.value = state.activeGroupName;
+          if (elements.groupInfoModal && !elements.groupInfoModal.hidden && elements.groupRenameInput) {
+          elements.groupRenameInput.value = state.activeGroupName;
+        }
         }
       }
     }
