@@ -3,6 +3,10 @@ import {
   PERIODS,
   FREE_SUBJECT_ID,
   UNKNOWN_SUBJECT_ID,
+  CLASSROOM_OPTIONS,
+  emptyClassrooms,
+  normalizeClassrooms,
+  formatClassrooms,
   normalizeRosterName,
   normalizeScheduleIds,
   isFreeSubjectId,
@@ -16,7 +20,7 @@ import {
   formatRelativeReadAt,
   formatChatListTime,
   isChatMessageUnread,
-} from './core.js?v=20260808-1600';
+} from './core.js?v=20260808-1730';
 
 const SESSION_KEY = 'timetableSessionToken';
 const COOLDOWN_MS = 10 * 60 * 1000;
@@ -78,6 +82,9 @@ const elements = {
   chatReportBtn: document.getElementById('chatReportBtn'),
   chatBlockNotice: document.getElementById('chatBlockNotice'),
   chatNavUnread: document.getElementById('chatNavUnread'),
+  chatSearch: document.getElementById('chatSearch'),
+  chatSearchResults: document.getElementById('chatSearchResults'),
+  chatBackBtn: document.getElementById('chatBackBtn'),
   toast: document.getElementById('toast'),
 };
 
@@ -93,6 +100,7 @@ const state = {
   students: [],
   roster: [],
   draftSchedule: null,
+  draftClassrooms: emptyClassrooms(),
   selectedStudentNo: '',
   previewUrl: '',
   toastTimer: null,
@@ -104,6 +112,8 @@ const state = {
   chatBlocked: false,
   chatThreadTimer: null,
   chatRoomTimer: null,
+  peerTyping: false,
+  lastTypingPingAt: 0,
 };
 
 fillSelect(elements.lookupDay, DAYS, (day) => `${day}요일`);
@@ -182,6 +192,9 @@ function bindEvents() {
   elements.chatInput.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendChatMessage(); } });
   elements.chatBlockBtn.addEventListener('click', toggleChatBlock);
   elements.chatReportBtn.addEventListener('click', reportChatUser);
+  elements.chatSearch?.addEventListener('input', renderChatSearchResults);
+  elements.chatBackBtn?.addEventListener('click', closeChatRoom);
+  elements.chatInput?.addEventListener('input', handleChatTyping);
   elements.friendFullScheduleBtn.addEventListener('click', () => {
     if (!state.selectedClassmateNo) return;
     const targetNo = state.selectedClassmateNo;
@@ -321,6 +334,7 @@ function clearSession() {
   state.students = [];
   state.roster = [];
   state.draftSchedule = null;
+  state.draftClassrooms = emptyClassrooms();
   state.selectedStudentNo = '';
   state.selectedClassmateNo = '';
   stopChatPolling();
@@ -355,6 +369,7 @@ async function refreshStudents() {
     studentNo: String(row.student_no),
     name: normalizeRosterName(row.name),
     schedule: normalizeScheduleIds(row.schedule),
+    classrooms: normalizeClassrooms(row.classrooms),
     updatedAt: row.updated_at || '',
   }));
   renderAllLookups();
@@ -395,7 +410,8 @@ function loadOwnScheduleIntoEditor() {
   const own = state.students.find((student) => student.studentNo === state.profile.student_no);
   if (!own) return;
   state.draftSchedule = normalizeScheduleIds(own.schedule);
-  renderEditableSchedule(state.draftSchedule);
+  state.draftClassrooms = normalizeClassrooms(own.classrooms);
+  renderEditableSchedule(state.draftSchedule, state.draftClassrooms);
   elements.analysisPanel.hidden = false;
 }
 
@@ -496,7 +512,8 @@ async function analyzeTimetable() {
     const image = await fileToDataUrl(file);
     const result = await callAnalysis(image);
     state.draftSchedule = normalizeScheduleIds(result.schedule);
-    renderEditableSchedule(state.draftSchedule);
+    state.draftClassrooms = normalizeClassrooms(result.classrooms || {});
+    renderEditableSchedule(state.draftSchedule, state.draftClassrooms);
     elements.analysisPanel.hidden = false;
     await loadProfile();
     renderAccessState();
@@ -507,7 +524,8 @@ async function analyzeTimetable() {
     if (error?.attemptConsumed) {
       if (!state.draftSchedule) {
         state.draftSchedule = createUnknownSchedule();
-        renderEditableSchedule(state.draftSchedule);
+        state.draftClassrooms = emptyClassrooms();
+        renderEditableSchedule(state.draftSchedule, state.draftClassrooms);
         elements.analysisPanel.hidden = false;
       }
       renderAccessState();
@@ -557,16 +575,17 @@ function fileToDataUrl(file) {
   });
 }
 
-function renderEditableSchedule(schedule) {
-  elements.editableScheduleWrap.replaceChildren(buildScheduleTable(schedule, true));
+function renderEditableSchedule(schedule, classrooms = state.draftClassrooms) {
+  elements.editableScheduleWrap.replaceChildren(buildScheduleTable(schedule, classrooms, true));
 }
 
-function renderReadonlySchedule(schedule, onCellClick) {
-  elements.readonlyScheduleWrap.replaceChildren(buildScheduleTable(schedule, false, onCellClick));
+function renderReadonlySchedule(schedule, classrooms, onCellClick) {
+  elements.readonlyScheduleWrap.replaceChildren(buildScheduleTable(schedule, classrooms, false, onCellClick));
 }
 
-function buildScheduleTable(schedule, editable, onCellClick) {
+function buildScheduleTable(schedule, classrooms, editable, onCellClick) {
   const normalized = normalizeScheduleIds(schedule);
+  const normalizedRooms = normalizeClassrooms(classrooms);
   const table = document.createElement('table');
   table.className = 'schedule-table';
   const thead = document.createElement('thead');
@@ -608,14 +627,42 @@ function buildScheduleTable(schedule, editable, onCellClick) {
           select.appendChild(option);
         }
         select.addEventListener('change', () => select.classList.toggle('is-unknown', select.value === UNKNOWN_SUBJECT_ID));
-        td.appendChild(select);
+        const roomSelect = document.createElement('select');
+        roomSelect.className = 'classroom-select';
+        roomSelect.multiple = true;
+        roomSelect.size = 2;
+        roomSelect.dataset.day = day;
+        roomSelect.dataset.period = String(period);
+        roomSelect.setAttribute('aria-label', `${day}요일 ${period}교시 교실 선택 (복수 가능)`);
+        const currentRooms = new Set(normalizedRooms[day][index]);
+        for (const room of CLASSROOM_OPTIONS) {
+          const roomOption = document.createElement('option');
+          roomOption.value = room;
+          roomOption.textContent = room;
+          roomOption.selected = currentRooms.has(room);
+          roomSelect.appendChild(roomOption);
+        }
+        const roomHint = document.createElement('span');
+        roomHint.className = 'classroom-edit-hint';
+        roomHint.textContent = '교실 · 복수선택 가능';
+        td.append(select, roomHint, roomSelect);
       } else {
         const displayName = state.subjectsById.get(subjectId) || (subjectId === FREE_SUBJECT_ID ? '공강' : '미확인');
         td.className = `schedule-cell${isFreeSubjectId(subjectId) ? ' is-free' : ''}`;
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'schedule-cell-button';
-        button.textContent = displayName;
+        const subjectText = document.createElement('span');
+        subjectText.className = 'schedule-subject-name';
+        subjectText.textContent = displayName;
+        button.appendChild(subjectText);
+        const roomText = formatClassrooms(normalizedRooms[day][index]);
+        if (roomText && !isFreeSubjectId(subjectId)) {
+          const room = document.createElement('span');
+          room.className = 'schedule-classroom';
+          room.textContent = roomText;
+          button.appendChild(room);
+        }
         button.addEventListener('click', () => onCellClick?.(day, period));
         td.appendChild(button);
       }
@@ -637,21 +684,35 @@ function collectEditedSchedule() {
   return normalizeScheduleIds(schedule);
 }
 
+
+function collectEditedClassrooms() {
+  const classrooms = emptyClassrooms();
+  elements.editableScheduleWrap.querySelectorAll('.classroom-select').forEach((select) => {
+    const day = select.dataset.day;
+    const index = Number(select.dataset.period) - 1;
+    if (!DAYS.includes(day) || index < 0 || index >= 7) return;
+    classrooms[day][index] = Array.from(select.selectedOptions).map((option) => option.value);
+  });
+  return normalizeClassrooms(classrooms);
+}
+
 async function saveTimetable() {
   if (!state.profile || !state.sessionToken) {
     showToast('먼저 학번과 PIN으로 로그인해주세요.', true);
     return;
   }
   const schedule = collectEditedSchedule();
+  const classrooms = collectEditedClassrooms();
   if (hasUnknownSubject(schedule)) {
     showToast('미확인 칸이 있습니다. 모든 칸에서 실제 과목 또는 공강을 선택해주세요.', true);
     return;
   }
   setButtonLoading(elements.saveBtn, true, '저장 중...');
   try {
-    const row = firstRow(await rpc('save_my_timetable', { p_session_token: state.sessionToken, p_schedule: schedule }));
+    const row = firstRow(await rpc('save_my_timetable', { p_session_token: state.sessionToken, p_schedule: schedule, p_classrooms: classrooms }));
     if (row) state.profile = { ...state.profile, ...row, registered: true };
     state.draftSchedule = schedule;
+    state.draftClassrooms = classrooms;
     await loadProfile();
     await refreshStudents();
     renderAccessState();
@@ -706,7 +767,7 @@ function selectStudent(studentNo, shouldScroll = true) {
   state.selectedStudentNo = student.studentNo;
   elements.selectedStudentTitle.textContent = `${buildStudentLabel(student, state.students)} 시간표`;
   elements.selectedStudentUpdated.textContent = student.updatedAt ? `마지막 저장: ${formatUpdatedAt(student.updatedAt)}` : '';
-  renderReadonlySchedule(student.schedule, (day, period) => renderClassmatesForCell(student.studentNo, day, period));
+  renderReadonlySchedule(student.schedule, student.classrooms, (day, period) => renderClassmatesForCell(student.studentNo, day, period));
   elements.classmatePanel.hidden = true;
   elements.studentScheduleCard.hidden = false;
   if (shouldScroll) elements.studentScheduleCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -736,7 +797,7 @@ function renderTimeLookup() {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'student-chip';
-      chip.textContent = buildStudentLabel(student, state.students);
+      chip.textContent = `${buildStudentLabel(student, state.students)}${formatClassrooms(studentRef.classrooms) ? ` · ${formatClassrooms(studentRef.classrooms)}` : ''}`;
       chip.addEventListener('click', () => selectStudent(studentRef.studentNo));
       names.appendChild(chip);
     }
@@ -871,7 +932,7 @@ function renderMyClassmates() {
     for (const slot of group.slots) {
       const badge = document.createElement('span');
       badge.className = 'classmate-slot';
-      badge.textContent = `${slot.day}요일 ${slot.period}교시`;
+      badge.textContent = `${slot.day}요일 ${slot.period}교시${formatClassrooms(slot.classrooms) ? ` · ${formatClassrooms(slot.classrooms)}` : ''}`;
       slotList.appendChild(badge);
     }
 
@@ -926,7 +987,7 @@ function renderFriendSharedClasses(studentNo) {
       const subject = document.createElement('strong');
       subject.textContent = group.subject;
       const slots = document.createElement('span');
-      slots.textContent = group.slots.map((slot) => `${slot.day} ${slot.period}교시`).join(' · ');
+      slots.textContent = group.slots.map((slot) => `${slot.day} ${slot.period}교시${formatClassrooms(slot.classrooms) ? ` · ${formatClassrooms(slot.classrooms)}` : ''}`).join(' / ');
       row.append(subject, slots);
       elements.friendSharedClasses.appendChild(row);
     }
@@ -940,6 +1001,71 @@ function renderFriendSharedClasses(studentNo) {
 }
 
 
+
+function renderChatSearchResults() {
+  if (!elements.chatSearchResults || !elements.chatSearch) return;
+  const query = String(elements.chatSearch.value || '').trim();
+  elements.chatSearchResults.replaceChildren();
+  elements.chatSearchResults.hidden = !query;
+  if (!query) return;
+  const results = searchRosterStudents(state.roster, query, state.profile?.student_no || '');
+  if (!results.length) {
+    elements.chatSearchResults.appendChild(createEmptyState('검색 결과가 없습니다.'));
+    return;
+  }
+  for (const result of results) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `dm-search-result${result.registered ? '' : ' is-disabled'}`;
+    const info = document.createElement('div');
+    const strong = document.createElement('strong'); strong.textContent = `${result.name} (${result.studentNo})`;
+    const small = document.createElement('span'); small.textContent = result.registered ? '메시지 보내기' : '아직 시간표를 등록하지 않았어요';
+    info.append(strong, small);
+    const action = document.createElement('span'); action.className='dm-search-action'; action.textContent = result.registered ? '채팅' : '미등록';
+    button.append(info, action);
+    button.disabled = !result.registered;
+    if (result.registered) button.addEventListener('click', async () => {
+      try { await openChatWithStudent(result.studentNo); elements.chatSearch.value=''; renderChatSearchResults(); }
+      catch (error) { showToast(humanizeError(error), true); }
+    });
+    elements.chatSearchResults.appendChild(button);
+  }
+}
+
+function closeChatRoom() {
+  if (state.activeThreadId) setTypingState(false).catch(() => {});
+  state.activeThreadId = 0;
+  state.activeChatPeer = null;
+  state.chatMessages = [];
+  state.peerTyping = false;
+  elements.chatRoom.hidden = true;
+  document.getElementById('chatView')?.classList.remove('is-room-open');
+  startChatPolling();
+}
+
+async function setTypingState(active) {
+  if (!state.activeThreadId || !state.sessionToken) return;
+  await rpc('chat_set_typing', { p_session_token: state.sessionToken, p_thread_id: state.activeThreadId, p_typing: Boolean(active) });
+}
+
+function handleChatTyping() {
+  if (!state.activeThreadId || state.chatBlocked) return;
+  const active = Boolean(String(elements.chatInput.value || '').trim());
+  const now = Date.now();
+  if (!active) { setTypingState(false).catch(() => {}); return; }
+  if (now - state.lastTypingPingAt < 1800) return;
+  state.lastTypingPingAt = now;
+  setTypingState(true).catch(() => {});
+}
+
+async function refreshPeerTyping() {
+  if (!state.activeThreadId) { state.peerTyping=false; return; }
+  try {
+    const row = firstRow(await rpc('chat_get_typing', { p_session_token: state.sessionToken, p_thread_id: state.activeThreadId }));
+    state.peerTyping = Boolean(row?.typing);
+  } catch { state.peerTyping = false; }
+}
+
 async function startChatFromFriend() {
   if (!state.selectedClassmateNo) return;
   try {
@@ -950,6 +1076,8 @@ async function startChatFromFriend() {
 }
 
 async function enterChatView() {
+  if (!state.roster.length) await loadRosterStudents();
+  renderChatSearchResults();
   await loadChatThreads();
   startChatPolling();
 }
@@ -1012,6 +1140,7 @@ async function openChatWithStudent(studentNo) {
   state.activeChatPeer = { studentNo: String(row.other_student_no), name: String(row.other_name) };
   state.chatBlocked = Boolean(row.blocked);
   elements.chatRoom.hidden = false;
+  document.getElementById('chatView')?.classList.add('is-room-open');
   await loadChatMessages();
   await loadChatThreads(true);
   startChatPolling();
@@ -1022,6 +1151,7 @@ async function openExistingChat(row) {
   state.activeChatPeer = { studentNo: String(row.other_student_no), name: String(row.other_name) };
   state.chatBlocked = Boolean(row.blocked);
   elements.chatRoom.hidden = false;
+  document.getElementById('chatView')?.classList.add('is-room-open');
   await loadChatMessages();
   startChatPolling();
 }
@@ -1032,6 +1162,7 @@ async function loadChatMessages(silent = false) {
     const data = await rpc('chat_list_messages', { p_session_token: state.sessionToken, p_thread_id: state.activeThreadId });
     state.chatMessages = Array.isArray(data) ? data : [];
     if (state.chatMessages.length) state.chatBlocked = Boolean(state.chatMessages[0].blocked);
+    await refreshPeerTyping();
     renderChatRoom();
     await rpc('chat_mark_read', { p_session_token: state.sessionToken, p_thread_id: state.activeThreadId });
     if (!silent) await loadChatThreads(true);
@@ -1044,7 +1175,8 @@ function renderChatRoom() {
   elements.chatMessages.replaceChildren();
   const otherReadId = Number(state.chatMessages.at(-1)?.other_last_read_message_id || 0);
   const otherReadAt = state.chatMessages.at(-1)?.other_last_read_at || null;
-  elements.chatReadStatus.textContent = formatRelativeReadAt(otherReadAt);
+  elements.chatReadStatus.textContent = state.peerTyping ? '입력 중...' : formatRelativeReadAt(otherReadAt);
+  elements.chatReadStatus.classList.toggle('is-typing', state.peerTyping);
   for (const message of state.chatMessages) {
     const mine = String(message.sender_student_no) === String(state.profile.student_no);
     const row = document.createElement('div'); row.className = `chat-message-row ${mine ? 'is-mine' : 'is-other'}`;
@@ -1070,6 +1202,7 @@ async function sendChatMessage() {
   try {
     await rpc('chat_send_message',{p_session_token:state.sessionToken,p_thread_id:state.activeThreadId,p_body:body});
     elements.chatInput.value='';
+    await setTypingState(false).catch(() => {});
     await loadChatMessages();
   } catch(error){ showToast(humanizeError(error),true); }
   finally { setButtonLoading(elements.chatSendBtn,false); if(state.chatBlocked) elements.chatSendBtn.disabled=true; }

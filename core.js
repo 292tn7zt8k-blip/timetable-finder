@@ -2,6 +2,27 @@ export const DAYS = ['월', '화', '수', '목', '금'];
 export const PERIODS = [1, 2, 3, 4, 5, 6, 7];
 export const FREE_SUBJECT_ID = 'FREE';
 export const UNKNOWN_SUBJECT_ID = 'UNKNOWN';
+export const CLASSROOM_OPTIONS = ['201','202','203','204','205','206','207','208','운동장','정보교과실'];
+
+export function emptyClassrooms() {
+  return Object.fromEntries(DAYS.map((day) => [day, PERIODS.map(() => [])]));
+}
+
+export function normalizeClassrooms(classrooms = {}) {
+  const allowed = new Set(CLASSROOM_OPTIONS);
+  return DAYS.reduce((result, day) => {
+    const source = Array.isArray(classrooms?.[day]) ? classrooms[day] : [];
+    result[day] = PERIODS.map((_, index) => {
+      const raw = Array.isArray(source[index]) ? source[index] : (source[index] ? String(source[index]).split(/[\/,]/) : []);
+      return [...new Set(raw.map((v) => String(v).trim()).filter((v) => allowed.has(v)))];
+    });
+    return result;
+  }, {});
+}
+
+export function formatClassrooms(values) {
+  return (Array.isArray(values) ? values : []).filter(Boolean).join(' / ');
+}
 
 export function normalizeRosterName(value) {
   const compact = String(value ?? '').trim().replace(/\s+/g, '');
@@ -42,12 +63,14 @@ export function getStudentsAt(students, subjectsById, day, period) {
     const studentNo = String(student?.studentNo ?? student?.student_no ?? '').trim();
     const name = normalizeRosterName(student?.name);
     const subjectId = normalizeScheduleIds(student?.schedule)[day][periodIndex];
+    const classrooms = normalizeClassrooms(student?.classrooms)[day][periodIndex];
     return {
       studentNo,
       name,
       subjectId,
       subject: subjectName(subjectsById, subjectId),
       isFree: isFreeSubjectId(subjectId),
+      classrooms,
     };
   }).filter((row) => row.studentNo && row.name);
 }
@@ -72,7 +95,7 @@ export function groupStudentsBySubject(students, subjectsById, day, period) {
         students: [],
       });
     }
-    groups.get(row.subjectId).students.push({ studentNo: row.studentNo, name: row.name });
+    groups.get(row.subjectId).students.push({ studentNo: row.studentNo, name: row.name, classrooms: row.classrooms });
   }
 
   return Array.from(groups.values())
@@ -125,6 +148,7 @@ export function findMyClassmatesBySubject(students, subjectsById, studentNo) {
   if (!me) return [];
 
   const mySchedule = normalizeScheduleIds(me.schedule);
+  const myClassrooms = normalizeClassrooms(me.classrooms);
   const groups = new Map();
 
   for (const day of DAYS) {
@@ -142,7 +166,7 @@ export function findMyClassmatesBySubject(students, subjectsById, studentNo) {
       }
 
       const group = groups.get(subjectId);
-      group.slots.push({ day, period });
+      group.slots.push({ day, period, classrooms: myClassrooms[day][index] });
 
       for (const student of all) {
         const otherNo = String(student?.studentNo ?? student?.student_no ?? '').trim();
@@ -179,6 +203,7 @@ export function findSharedClassesWithStudent(students, subjectsById, myStudentNo
 
   const mine = normalizeScheduleIds(me.schedule);
   const theirs = normalizeScheduleIds(other.schedule);
+  const myClassrooms = normalizeClassrooms(me.classrooms);
   const groups = new Map();
 
   for (const day of DAYS) {
@@ -193,7 +218,7 @@ export function findSharedClassesWithStudent(students, subjectsById, myStudentNo
           slots: [],
         });
       }
-      groups.get(subjectId).slots.push({ day, period });
+      groups.get(subjectId).slots.push({ day, period, classrooms: myClassrooms[day][index] });
     });
   }
 
