@@ -20,7 +20,7 @@ import {
   formatRelativeReadAt,
   formatChatListTime,
   isChatMessageUnread,
-} from './core.js?v=20260808-1900';
+} from './core.js?v=20260808-1725';
 
 const SESSION_KEY = 'timetableSessionToken';
 const COOLDOWN_MS = 10 * 60 * 1000;
@@ -1241,16 +1241,40 @@ async function uploadChatImage(file) {
 }
 
 async function loadChatImage(imagePath, img) {
-  if (!imagePath || !img) return;
+  if (!imagePath || !img || !state.activeThreadId) return;
+
   const cached = state.chatImageUrls.get(imagePath);
-  if (cached) { img.src = cached; return; }
+  if (cached) {
+    img.src = cached;
+    return;
+  }
+
   try {
-    const response = await chatMediaRequest({ action:'download', thread_id:state.activeThreadId, path:imagePath });
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    state.chatImageUrls.set(imagePath, url);
-    img.src = url;
-  } catch {
+    const response = await chatMediaRequest({
+      action: 'signed_url',
+      thread_id: state.activeThreadId,
+      path: imagePath,
+    });
+
+    const data = await response.json();
+    const signedUrl = data?.signedUrl || data?.signed_url || data?.url || '';
+    if (!signedUrl) throw new Error('SIGNED_URL_MISSING');
+
+    state.chatImageUrls.set(imagePath, signedUrl);
+    img.classList.remove('is-error');
+    img.alt = '채팅으로 보낸 사진';
+    img.src = signedUrl;
+
+    img.onerror = () => {
+      state.chatImageUrls.delete(imagePath);
+      img.removeAttribute('src');
+      img.alt = '사진을 불러오지 못했습니다.';
+      img.classList.add('is-error');
+    };
+  } catch (error) {
+    console.error('CHAT_IMAGE_LOAD_FAILED', imagePath, error);
+    state.chatImageUrls.delete(imagePath);
+    img.removeAttribute('src');
     img.alt = '사진을 불러오지 못했습니다.';
     img.classList.add('is-error');
   }
