@@ -56,6 +56,10 @@ const elements = {
   timeLookupResults: document.getElementById('timeLookupResults'),
   myLookupScheduleWrap: document.getElementById('myLookupScheduleWrap'),
   myLookupScheduleUpdated: document.getElementById('myLookupScheduleUpdated'),
+  myClassmatePanel: document.getElementById('myClassmatePanel'),
+  myClassmateTitle: document.getElementById('myClassmateTitle'),
+  myClassmateMeta: document.getElementById('myClassmateMeta'),
+  myClassmateList: document.getElementById('myClassmateList'),
   studentScheduleCard: document.getElementById('studentScheduleCard'),
   selectedStudentTitle: document.getElementById('selectedStudentTitle'),
   selectedStudentUpdated: document.getElementById('selectedStudentUpdated'),
@@ -936,7 +940,12 @@ function renderMyLookupSchedule() {
     me.schedule,
     me.classrooms,
     false,
-    (day, period) => renderClassmatesForCell(me.studentNo, day, period),
+    (day, period) => renderClassmatesForCell(me.studentNo, day, period, {
+      panel: elements.myClassmatePanel,
+      title: elements.myClassmateTitle,
+      meta: elements.myClassmateMeta,
+      list: elements.myClassmateList,
+    }),
     (subjectId, day, period, storedRooms) =>
       getCanonicalClassroomsForSlot(subjectId, day, period, storedRooms),
   );
@@ -990,15 +999,22 @@ function renderTimeLookup() {
   }
 }
 
-function renderClassmatesForCell(studentNo, day, period) {
+function renderClassmatesForCell(studentNo, day, period, target = null) {
   const match = findClassmatesForCell(state.students, state.subjectsById, studentNo, day, period);
   if (!match) return;
-  elements.classmateTitle.textContent = match.subjectId === FREE_SUBJECT_ID ? '같이 공강인 친구' : `${match.subject} 같이 듣는 친구`;
+
+  const panel = target?.panel || elements.classmatePanel;
+  const title = target?.title || elements.classmateTitle;
+  const meta = target?.meta || elements.classmateMeta;
+  const list = target?.list || elements.classmateList;
+  if (!panel || !title || !meta || !list) return;
+
+  title.textContent = match.subjectId === FREE_SUBJECT_ID ? '같이 공강인 친구' : `${match.subject} 같이 듣는 친구`;
   const selectedStudent = state.students.find((student) => student.studentNo === String(studentNo));
   const roomText = formatClassrooms(getResolvedRoomsForStudentSlot(selectedStudent, day, period));
-  elements.classmateMeta.textContent = `${day}요일 ${period}교시${roomText ? ` · ${roomText}` : ''} · 전체 ${match.students.length}명`;
-  elements.classmateList.replaceChildren();
-  if (!match.classmates.length) elements.classmateList.appendChild(createEmptyState('같은 시간에 함께 있는 다른 친구가 없습니다.'));
+  meta.textContent = `${day}요일 ${period}교시${roomText ? ` · ${roomText}` : ''} · 전체 ${match.students.length}명`;
+  list.replaceChildren();
+  if (!match.classmates.length) list.appendChild(createEmptyState('같은 시간에 함께 있는 다른 친구가 없습니다.'));
   else {
     for (const studentRef of match.classmates) {
       const student = state.students.find((item) => item.studentNo === studentRef.studentNo) || studentRef;
@@ -1007,10 +1023,10 @@ function renderClassmatesForCell(studentNo, day, period) {
       chip.className = 'student-chip';
       chip.textContent = buildStudentLabel(student, state.students);
       chip.addEventListener('click', () => selectStudent(studentRef.studentNo));
-      elements.classmateList.appendChild(chip);
+      list.appendChild(chip);
     }
   }
-  elements.classmatePanel.hidden = false;
+  panel.hidden = false;
 }
 
 
