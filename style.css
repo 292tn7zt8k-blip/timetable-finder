@@ -1350,3 +1350,24 @@ body.is-lightbox-open { overflow: hidden; }
   .group-invite-card { grid-template-columns:1fr; }
   .group-invite-actions { justify-content:flex-end; }
 }
+
+
+/* ===== timetable lookup / classroom consistency ===== */
+.my-lookup-schedule {
+  margin-bottom: 18px;
+}
+
+.classmate-subject-card__room {
+  margin: 4px 0 0;
+  color: var(--text-muted, #7b8190);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.subject-group__classrooms {
+  margin-top: 3px;
+  color: var(--text-muted, #7b8190);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}

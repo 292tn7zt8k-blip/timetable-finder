@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#ffffff">
   <meta name="description" content="학생 인증 후 시간표를 공유하고 친구들의 수업과 공강을 찾는 서비스">
   <title>시간표 공유</title>
-  <link rel="stylesheet" href="style.css?v=20260808-2210">
+  <link rel="stylesheet" href="style.css?v=20260808-1908">
 </head>
 <body>
   <div class="site-shell">
@@ -113,6 +113,18 @@
           <p>내 시간표 등록을 완료한 학생만 조회할 수 있습니다.</p>
         </div>
 
+        <article class="card my-lookup-schedule">
+          <div class="card-heading card-heading--responsive">
+            <div>
+              <p class="section-kicker">나의 시간표</p>
+              <h3>내 시간표</h3>
+            </div>
+            <p class="updated-text" id="myLookupScheduleUpdated"></p>
+          </div>
+          <p class="schedule-click-hint">과목 칸을 누르면 같은 시간에 같은 수업을 듣는 친구를 볼 수 있습니다.</p>
+          <div class="table-scroll" id="myLookupScheduleWrap" tabindex="0"></div>
+        </article>
+
         <div class="lookup-grid">
           <article class="card">
             <div class="card-heading"><div><p class="section-kicker">사람별</p><h3>학생 찾기</h3></div></div>
@@ -179,16 +191,14 @@
 
       <section class="view dm-view" id="chatView" data-view="chat" aria-labelledby="chat-title" hidden>
         <div class="section-heading">
-          <div><p class="section-kicker">메시지</p><h2 id="chat-title">채팅</h2></div>
-          <p>1:1 또는 단체채팅으로 대화할 수 있습니다. 메시지는 최근 30일만 보관됩니다.</p>
+          <div><p class="section-kicker">메시지</p><h2 id="chat-title">1:1 채팅</h2></div>
+          <p>시간표를 등록한 학생끼리만 대화할 수 있습니다. 메시지는 최근 30일만 보관됩니다.</p>
         </div>
 
         <div class="dm-search-wrap">
           <input id="chatSearch" type="search" placeholder="이름 또는 학번으로 새 채팅 검색" autocomplete="off">
-          <button class="dm-new-group-btn" id="groupCreateBtn" type="button">새 단체채팅</button>
           <div class="dm-search-results" id="chatSearchResults" hidden></div>
         </div>
-        <div class="group-invite-inbox" id="groupInviteInbox" hidden></div>
         <div class="chat-layout dm-layout">
           <section class="chat-thread-card dm-thread-pane" id="chatThreadCard">
             <div class="dm-list-heading"><strong>메시지</strong><span>최근 30일</span></div>
@@ -198,11 +208,11 @@
           <section class="chat-room dm-room" id="chatRoom" hidden>
             <div class="chat-room__header dm-room-header">
               <button class="dm-back" id="chatBackBtn" type="button" aria-label="대화 목록으로 돌아가기">←</button>
-              <button class="dm-room-title" id="chatRoomInfoBtn" type="button" disabled>
-                <p class="section-kicker" id="chatRoomKind">1:1 채팅</p>
+              <div>
+                <p class="section-kicker">1:1 채팅</p>
                 <h3 id="chatPeerTitle">친구</h3>
                 <p class="chat-read-status" id="chatReadStatus"></p>
-              </button>
+              </div>
               <div class="chat-room__tools">
                 <button class="button button--ghost chat-tool-btn" id="chatBlockBtn" type="button">차단</button>
                 <button class="button button--ghost chat-tool-btn" id="chatReportBtn" type="button">신고</button>
@@ -239,28 +249,6 @@
     <button id="chatImageLightboxClose" type="button" aria-label="사진 닫기">×</button>
     <img id="chatImageLightboxImage" alt="채팅 사진 크게 보기">
   </div>
-  <div class="dm-modal" id="groupCreateModal" hidden>
-    <section class="dm-modal__card" role="dialog" aria-modal="true" aria-labelledby="groupCreateTitle">
-      <div class="dm-modal__header"><strong id="groupCreateTitle">새 단체채팅</strong><button id="groupCreateCloseBtn" type="button" aria-label="닫기">×</button></div>
-      <label class="dm-modal__field">채팅방 이름<input id="groupNameInput" maxlength="40" placeholder="채팅방 이름"></label>
-      <label class="dm-modal__field">친구 초대<input id="groupMemberSearch" type="search" placeholder="이름 또는 학번 검색" autocomplete="off"></label>
-      <div class="group-selected-members" id="groupSelectedMembers"></div>
-      <div class="group-member-search-results" id="groupMemberSearchResults"></div>
-      <button class="button button--primary button--full" id="groupCreateConfirmBtn" type="button">초대장 보내고 만들기</button>
-    </section>
-  </div>
-
-  <div class="dm-modal" id="groupInfoModal" hidden>
-    <section class="dm-modal__card" role="dialog" aria-modal="true" aria-labelledby="groupInfoTitle">
-      <div class="dm-modal__header"><strong id="groupInfoTitle">채팅방 정보</strong><button id="groupInfoCloseBtn" type="button" aria-label="닫기">×</button></div>
-      <div><p class="dm-modal__label">채팅방 이름</p><div class="group-name-edit"><input id="groupRenameInput" maxlength="40" placeholder="채팅방 이름"><button class="button button--secondary" id="groupRenameBtn" type="button">변경</button></div></div>
-      <div><p class="dm-modal__label">참여자</p><div class="group-member-list" id="groupMemberList"></div></div>
-      <label class="dm-modal__field">친구 추가 초대<input id="groupInviteSearch" type="search" placeholder="이름 또는 학번 검색" autocomplete="off"></label>
-      <div class="group-member-search-results" id="groupInviteSearchResults"></div>
-      <button class="button button--ghost button--full group-leave-btn" id="groupLeaveBtn" type="button">채팅방 나가기</button>
-    </section>
-  </div>
-
 
   <script>
     window.TIMETABLE_SUPABASE_CONFIG = {
@@ -268,6 +256,6 @@
       publishableKey: 'sb_publishable_Sr9zGqyzXGNX-PO8pmOMzw_Chuvp0s7'
     };
   </script>
-  <script type="module" src="app.js?v=20260808-2210"></script>
+  <script type="module" src="app.js?v=20260808-1908"></script>
 </body>
 </html>

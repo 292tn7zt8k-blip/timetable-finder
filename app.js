@@ -20,7 +20,7 @@ import {
   formatRelativeReadAt,
   formatChatListTime,
   isChatMessageUnread,
-} from './core.js?v=20260808-1725';
+} from './core.js?v=20260808-1908';
 
 const SESSION_KEY = 'timetableSessionToken';
 const COOLDOWN_MS = 10 * 60 * 1000;
@@ -54,6 +54,8 @@ const elements = {
   lookupPeriod: document.getElementById('lookupPeriod'),
   timeLookupBtn: document.getElementById('timeLookupBtn'),
   timeLookupResults: document.getElementById('timeLookupResults'),
+  myLookupScheduleWrap: document.getElementById('myLookupScheduleWrap'),
+  myLookupScheduleUpdated: document.getElementById('myLookupScheduleUpdated'),
   studentScheduleCard: document.getElementById('studentScheduleCard'),
   selectedStudentTitle: document.getElementById('selectedStudentTitle'),
   selectedStudentUpdated: document.getElementById('selectedStudentUpdated'),
@@ -635,11 +637,13 @@ function renderEditableSchedule(schedule, classrooms = state.draftClassrooms) {
   elements.editableScheduleWrap.replaceChildren(buildScheduleTable(schedule, classrooms, true));
 }
 
-function renderReadonlySchedule(schedule, classrooms, onCellClick) {
-  elements.readonlyScheduleWrap.replaceChildren(buildScheduleTable(schedule, classrooms, false, onCellClick));
+function renderReadonlySchedule(schedule, classrooms, onCellClick, roomResolver = null) {
+  elements.readonlyScheduleWrap.replaceChildren(
+    buildScheduleTable(schedule, classrooms, false, onCellClick, roomResolver)
+  );
 }
 
-function buildScheduleTable(schedule, classrooms, editable, onCellClick) {
+function buildScheduleTable(schedule, classrooms, editable, onCellClick, roomResolver = null) {
   const normalized = normalizeScheduleIds(schedule);
   const normalizedRooms = normalizeClassrooms(classrooms);
   const table = document.createElement('table');
@@ -712,7 +716,11 @@ function buildScheduleTable(schedule, classrooms, editable, onCellClick) {
         subjectText.className = 'schedule-subject-name';
         subjectText.textContent = displayName;
         button.appendChild(subjectText);
-        const roomText = formatClassrooms(normalizedRooms[day][index]);
+        const storedRooms = normalizedRooms[day][index];
+        const resolvedRooms = typeof roomResolver === 'function'
+          ? roomResolver(subjectId, day, period, storedRooms)
+          : storedRooms;
+        const roomText = formatClassrooms(resolvedRooms);
         if (roomText && !isFreeSubjectId(subjectId)) {
           const room = document.createElement('span');
           room.className = 'schedule-classroom';
@@ -781,6 +789,7 @@ async function saveTimetable() {
 }
 
 function renderAllLookups() {
+  renderMyLookupSchedule();
   renderStudentList();
   renderTimeLookup();
   renderMyClassmates();
@@ -823,11 +832,107 @@ function selectStudent(studentNo, shouldScroll = true) {
   state.selectedStudentNo = student.studentNo;
   elements.selectedStudentTitle.textContent = `${buildStudentLabel(student, state.students)} 시간표`;
   elements.selectedStudentUpdated.textContent = student.updatedAt ? `마지막 저장: ${formatUpdatedAt(student.updatedAt)}` : '';
-  renderReadonlySchedule(student.schedule, student.classrooms, (day, period) => renderClassmatesForCell(student.studentNo, day, period));
+  renderReadonlySchedule(
+    student.schedule,
+    student.classrooms,
+    (day, period) => renderClassmatesForCell(student.studentNo, day, period),
+    (subjectId, day, period, storedRooms) =>
+      getCanonicalClassroomsForSlot(subjectId, day, period, storedRooms),
+  );
   elements.classmatePanel.hidden = true;
   elements.studentScheduleCard.hidden = false;
   if (shouldScroll) elements.studentScheduleCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+
+
+function getCanonicalClassroomsForSlot(subjectId, day, period, preferredRooms = []) {
+  const wanted = String(subjectId || '').trim();
+  const periodIndex = PERIODS.indexOf(Number(period));
+  const preferred = normalizeClassrooms({ [day]: [[], [], [], [], [], [], []].map((v, i) => i === periodIndex ? preferredRooms : v) })?.[day]?.[periodIndex] || [];
+
+  if (!wanted || wanted === FREE_SUBJECT_ID || wanted === UNKNOWN_SUBJECT_ID || !DAYS.includes(day) || periodIndex < 0) {
+    return preferred;
+  }
+
+  const counts = new Map();
+
+  for (const student of state.students) {
+    const schedule = normalizeScheduleIds(student.schedule);
+    if (schedule[day][periodIndex] !== wanted) continue;
+
+    const rooms = normalizeClassrooms(student.classrooms)[day][periodIndex];
+    const label = formatClassrooms(rooms);
+    if (!label) continue;
+
+    const entry = counts.get(label) || { count: 0, rooms };
+    entry.count += 1;
+    counts.set(label, entry);
+  }
+
+  if (!counts.size) return preferred;
+
+  const ranked = Array.from(counts.values()).sort((a, b) => b.count - a.count);
+  const best = ranked[0];
+
+  // 같은 요일·교시·과목에서 확인된 교실을 우선한다.
+  // 과목 전체 기준 fallback을 쓰지 않으므로 같은 과목이 다른 시간에
+  // 다른 교실을 쓰는 경우에도 잘못 섞이지 않는다.
+  if (best?.rooms?.length) return best.rooms;
+
+  return preferred;
+}
+
+function getResolvedRoomsForStudentSlot(student, day, period) {
+  if (!student) return [];
+  const index = PERIODS.indexOf(Number(period));
+  if (!DAYS.includes(day) || index < 0) return [];
+
+  const schedule = normalizeScheduleIds(student.schedule);
+  const classrooms = normalizeClassrooms(student.classrooms);
+  const subjectId = schedule[day][index];
+
+  return getCanonicalClassroomsForSlot(
+    subjectId,
+    day,
+    period,
+    classrooms[day][index],
+  );
+}
+
+function renderMyLookupSchedule() {
+  if (!elements.myLookupScheduleWrap) return;
+
+  if (!state.profile?.registered) {
+    elements.myLookupScheduleWrap.replaceChildren(createEmptyState('시간표를 등록하면 내 시간표가 표시됩니다.'));
+    if (elements.myLookupScheduleUpdated) elements.myLookupScheduleUpdated.textContent = '';
+    return;
+  }
+
+  const me = state.students.find((student) => student.studentNo === String(state.profile.student_no));
+
+  if (!me) {
+    elements.myLookupScheduleWrap.replaceChildren(createEmptyState('내 시간표 정보를 불러오는 중입니다.'));
+    return;
+  }
+
+  if (elements.myLookupScheduleUpdated) {
+    elements.myLookupScheduleUpdated.textContent = me.updatedAt
+      ? `마지막 저장: ${formatUpdatedAt(me.updatedAt)}`
+      : '';
+  }
+
+  const table = buildScheduleTable(
+    me.schedule,
+    me.classrooms,
+    false,
+    (day, period) => renderClassmatesForCell(me.studentNo, day, period),
+    (subjectId, day, period, storedRooms) =>
+      getCanonicalClassroomsForSlot(subjectId, day, period, storedRooms),
+  );
+
+  elements.myLookupScheduleWrap.replaceChildren(table);
+}
+
 
 function renderTimeLookup() {
   if (!state.profile?.registered) return;
@@ -846,15 +951,17 @@ function renderTimeLookup() {
     const count = document.createElement('span');
     count.textContent = `${group.students.length}명`;
     heading.append(subject, count);
-    const classroomLabels = Array.from(new Set(
-      group.students
-        .map((studentRef) => formatClassrooms(studentRef.classrooms))
-        .filter(Boolean)
-    ));
+    const resolvedRooms = getCanonicalClassroomsForSlot(
+      group.subjectId,
+      day,
+      period,
+      group.students.find((studentRef) => Array.isArray(studentRef.classrooms) && studentRef.classrooms.length)?.classrooms || [],
+    );
+
     const classrooms = document.createElement('div');
     classrooms.className = 'subject-group__classrooms';
-    classrooms.textContent = classroomLabels.join(' · ');
-    classrooms.hidden = group.isFree || classroomLabels.length === 0;
+    classrooms.textContent = formatClassrooms(resolvedRooms);
+    classrooms.hidden = group.isFree || resolvedRooms.length === 0;
 
     const names = document.createElement('div');
     names.className = 'subject-group__students';
@@ -876,7 +983,9 @@ function renderClassmatesForCell(studentNo, day, period) {
   const match = findClassmatesForCell(state.students, state.subjectsById, studentNo, day, period);
   if (!match) return;
   elements.classmateTitle.textContent = match.subjectId === FREE_SUBJECT_ID ? '같이 공강인 친구' : `${match.subject} 같이 듣는 친구`;
-  elements.classmateMeta.textContent = `${day}요일 ${period}교시 · 전체 ${match.students.length}명`;
+  const selectedStudent = state.students.find((student) => student.studentNo === String(studentNo));
+  const roomText = formatClassrooms(getResolvedRoomsForStudentSlot(selectedStudent, day, period));
+  elements.classmateMeta.textContent = `${day}요일 ${period}교시${roomText ? ` · ${roomText}` : ''} · 전체 ${match.students.length}명`;
   elements.classmateList.replaceChildren();
   if (!match.classmates.length) elements.classmateList.appendChild(createEmptyState('같은 시간에 함께 있는 다른 친구가 없습니다.'));
   else {
@@ -986,7 +1095,23 @@ function renderMyClassmates() {
     kicker.textContent = '내 수업';
     const title = document.createElement('h3');
     title.textContent = group.subject;
-    titleWrap.append(kicker, title);
+
+    const resolvedRoomLabels = Array.from(new Set(
+      group.slots
+        .map((slot) => {
+          const me = state.students.find((student) => student.studentNo === String(state.profile.student_no));
+          const rooms = getResolvedRoomsForStudentSlot(me, slot.day, slot.period);
+          return formatClassrooms(rooms);
+        })
+        .filter(Boolean)
+    ));
+
+    const room = document.createElement('p');
+    room.className = 'classmate-subject-card__room';
+    room.textContent = resolvedRoomLabels.join(' · ');
+    room.hidden = resolvedRoomLabels.length === 0;
+
+    titleWrap.append(kicker, title, room);
 
     const count = document.createElement('span');
     count.className = 'classmate-count';
@@ -998,7 +1123,7 @@ function renderMyClassmates() {
     for (const slot of group.slots) {
       const badge = document.createElement('span');
       badge.className = 'classmate-slot';
-      badge.textContent = `${slot.day}요일 ${slot.period}교시${formatClassrooms(slot.classrooms) ? ` · ${formatClassrooms(slot.classrooms)}` : ''}`;
+      badge.textContent = `${slot.day}요일 ${slot.period}교시`;
       slotList.appendChild(badge);
     }
 
@@ -1053,7 +1178,11 @@ function renderFriendSharedClasses(studentNo) {
       const subject = document.createElement('strong');
       subject.textContent = group.subject;
       const slots = document.createElement('span');
-      slots.textContent = group.slots.map((slot) => `${slot.day} ${slot.period}교시${formatClassrooms(slot.classrooms) ? ` · ${formatClassrooms(slot.classrooms)}` : ''}`).join(' / ');
+      const me = state.students.find((student) => student.studentNo === String(state.profile.student_no));
+      slots.textContent = group.slots.map((slot) => {
+        const roomText = formatClassrooms(getResolvedRoomsForStudentSlot(me, slot.day, slot.period));
+        return `${slot.day} ${slot.period}교시${roomText ? ` · ${roomText}` : ''}`;
+      }).join(' / ');
       row.append(subject, slots);
       elements.friendSharedClasses.appendChild(row);
     }
@@ -1208,6 +1337,7 @@ async function createGroupChat() {
   const name = String(elements.groupNameInput.value || '').trim();
   if (!name) { showToast('단체채팅방 이름을 입력해주세요.', true); return; }
   const invitees = Array.from(state.groupSelectedInvitees);
+  if (!invitees.length) { showToast('초대할 친구를 한 명 이상 선택해주세요.', true); return; }
   setButtonLoading(elements.groupCreateConfirmBtn, true, '만드는 중...');
   try {
     const row = firstRow(await rpc('group_create_with_invites', {
@@ -1447,7 +1577,8 @@ async function loadChatMessages(silent = false, reset = false) {
     }
     state.chatLastMessageId = Number(state.chatMessages.at(-1)?.id || 0);
 
-    if (reset || rows.length || statusChanged) renderChatRoom();
+    if (reset || rows.length) renderChatRoom();
+    else if (statusChanged) updateChatRoomStatus();
     if (expectedType === 'group') await rpc('group_mark_read', { p_session_token: state.sessionToken, p_group_id: expectedId });
     else await rpc('chat_mark_read', { p_session_token: state.sessionToken, p_thread_id: expectedId });
     if (!silent) await loadChatThreads(true);
@@ -1567,10 +1698,9 @@ function closeChatImageLightbox() {
   document.body.classList.remove('is-lightbox-open');
 }
 
-function renderChatRoom() {
+function updateChatRoomStatus() {
   const isGroup = state.activeChatType === 'group';
   if (!isGroup && !state.activeChatPeer) return;
-  const stickToBottom = isChatNearBottom();
   elements.chatRoomKind.textContent = isGroup ? '단체채팅' : '1:1 채팅';
   elements.chatPeerTitle.textContent = isGroup ? state.activeGroupName : `${state.activeChatPeer.name} (${state.activeChatPeer.studentNo})`;
   elements.chatRoomInfoBtn.disabled = !isGroup;
@@ -1578,6 +1708,20 @@ function renderChatRoom() {
     ? String(state.peerTyping || '')
     : (state.peerTyping ? '입력 중...' : formatRelativeReadAt(state.directOtherReadAt));
   elements.chatReadStatus.classList.toggle('is-typing', Boolean(state.peerTyping));
+  elements.chatBlockNotice.hidden = isGroup || !state.chatBlocked;
+  elements.chatInput.disabled = !isGroup && state.chatBlocked;
+  elements.chatSendBtn.disabled = !isGroup && state.chatBlocked;
+  if (elements.chatPhotoBtn) elements.chatPhotoBtn.disabled = !isGroup && state.chatBlocked;
+  elements.chatBlockBtn.hidden = isGroup;
+  elements.chatReportBtn.hidden = isGroup;
+  if (!isGroup) elements.chatBlockBtn.textContent = state.chatBlocked ? '차단 해제' : '차단';
+}
+
+function renderChatRoom() {
+  const isGroup = state.activeChatType === 'group';
+  if (!isGroup && !state.activeChatPeer) return;
+  const stickToBottom = isChatNearBottom();
+  updateChatRoomStatus();
   elements.chatMessages.replaceChildren();
 
   let previousSender = '';
@@ -1620,13 +1764,6 @@ function renderChatRoom() {
     previousSender = String(message.sender_student_no || '');
   }
 
-  elements.chatBlockNotice.hidden = isGroup || !state.chatBlocked;
-  elements.chatInput.disabled = !isGroup && state.chatBlocked;
-  elements.chatSendBtn.disabled = !isGroup && state.chatBlocked;
-  if (elements.chatPhotoBtn) elements.chatPhotoBtn.disabled = !isGroup && state.chatBlocked;
-  elements.chatBlockBtn.hidden = isGroup;
-  elements.chatReportBtn.hidden = isGroup;
-  if (!isGroup) elements.chatBlockBtn.textContent = state.chatBlocked ? '차단 해제' : '차단';
   if (stickToBottom) requestAnimationFrame(scrollChatToBottom);
 }
 
@@ -1830,6 +1967,10 @@ function humanizeError(error) {
   if (/CHAT_RATE_LIMIT/.test(message)) return '메시지를 너무 빠르게 보내고 있습니다. 잠시 후 다시 보내주세요.';
   if (/CHAT_MESSAGE_TOO_LONG/.test(message)) return '메시지는 최대 500자입니다.';
   if (/CHAT_FORBIDDEN|CHAT_NOT_FOUND/.test(message)) return '이 대화에 접근할 수 없습니다.';
+  if (/GROUP_INVITE_NOT_FOUND/.test(message)) return '이미 처리됐거나 만료된 초대입니다.';
+  if (/GROUP_ALREADY_MEMBER/.test(message)) return '이미 이 채팅방에 들어와 있는 친구입니다.';
+  if (/GROUP_NAME_REQUIRED/.test(message)) return '단체채팅방 이름을 입력해주세요.';
+  if (/GROUP_FORBIDDEN|GROUP_NOT_FOUND/.test(message)) return '이 단체채팅방에 접근할 수 없습니다.';
   if (/REGISTRATION_REQUIRED/.test(message)) return '시간표를 먼저 등록해야 채팅할 수 있습니다.';
   if (/Failed to fetch|NetworkError|Load failed/i.test(message)) return '서버에 연결하지 못했습니다. 인터넷 연결을 확인해주세요.';
   return message.length > 180 ? '처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' : message;
