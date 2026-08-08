@@ -20,7 +20,7 @@ import {
   formatRelativeReadAt,
   formatChatListTime,
   isChatMessageUnread,
-} from './core.js?v=20260808-1908';
+} from './core.js?v=20260808-2048';
 
 const SESSION_KEY = 'timetableSessionToken';
 const COOLDOWN_MS = 10 * 60 * 1000;
@@ -849,52 +849,76 @@ function selectStudent(studentNo, shouldScroll = true) {
 }
 
 
-function getCanonicalClassroomsForSlot(subjectId, day, period, preferredRooms = []) {
+function getCanonicalClassroomsForSubject(subjectId, day = '', period = 0, preferredRooms = []) {
   const wanted = String(subjectId || '').trim();
-  const periodIndex = PERIODS.indexOf(Number(period));
-  const preferred = normalizeClassrooms({ [day]: [[], [], [], [], [], [], []].map((v, i) => i === periodIndex ? preferredRooms : v) })?.[day]?.[periodIndex] || [];
-
-  if (!wanted || wanted === FREE_SUBJECT_ID || wanted === UNKNOWN_SUBJECT_ID || !DAYS.includes(day) || periodIndex < 0) {
-    return preferred;
+  if (!wanted || wanted === FREE_SUBJECT_ID || wanted === UNKNOWN_SUBJECT_ID) {
+    return Array.isArray(preferredRooms) ? preferredRooms : [];
   }
 
-  // 시간별 조회에서도 "같이 듣는 친구"와 동일하게 내 시간표의
-  // 해당 요일·교시·과목 교실을 최우선 기준으로 사용한다.
-  const me = state.students.find((student) => student.studentNo === String(state.profile?.student_no || ''));
+  const preferred = Array.isArray(preferredRooms) ? preferredRooms.filter(Boolean) : [];
+  const scores = new Map();
+
+  const addCandidate = (rooms, weight = 1) => {
+    const normalized = Array.isArray(rooms) ? rooms.filter(Boolean) : [];
+    const label = formatClassrooms(normalized);
+    if (!label) return;
+    const current = scores.get(label) || { score: 0, rooms: normalized };
+    current.score += weight;
+    scores.set(label, current);
+  };
+
+  // 1) 내가 이 과목을 듣고 있다면 내 시간표의 과목-교실 연결을 가장 강한 기준으로 사용.
+  const me = state.students.find(
+    (student) => student.studentNo === String(state.profile?.student_no || '')
+  );
+
   if (me) {
     const mySchedule = normalizeScheduleIds(me.schedule);
-    const myRooms = normalizeClassrooms(me.classrooms);
-    if (mySchedule[day][periodIndex] === wanted && myRooms[day][periodIndex].length) {
-      return myRooms[day][periodIndex];
+    const myClassrooms = normalizeClassrooms(me.classrooms);
+
+    for (const d of DAYS) {
+      PERIODS.forEach((p, index) => {
+        if (mySchedule[d][index] === wanted && myClassrooms[d][index].length) {
+          addCandidate(myClassrooms[d][index], 100);
+        }
+      });
     }
   }
 
-  const counts = new Map();
-
+  // 2) 전체 학생 데이터에서 "이 과목과 실제로 함께 저장된 교실" 빈도를 누적.
   for (const student of state.students) {
     const schedule = normalizeScheduleIds(student.schedule);
-    if (schedule[day][periodIndex] !== wanted) continue;
+    const classrooms = normalizeClassrooms(student.classrooms);
 
-    const rooms = normalizeClassrooms(student.classrooms)[day][periodIndex];
-    const label = formatClassrooms(rooms);
-    if (!label) continue;
+    for (const d of DAYS) {
+      PERIODS.forEach((p, index) => {
+        if (schedule[d][index] !== wanted) return;
+        const rooms = classrooms[d][index];
+        if (!rooms.length) return;
 
-    const entry = counts.get(label) || { count: 0, rooms };
-    entry.count += 1;
-    counts.set(label, entry);
+        // 전체 과목-교실 일치도
+        addCandidate(rooms, 4);
+
+        // 현재 조회 중인 정확한 요일·교시라면 추가 가중치
+        if (d === day && Number(p) === Number(period)) addCandidate(rooms, 3);
+      });
+    }
   }
 
-  if (!counts.size) return preferred;
+  // 3) 호출자가 가진 정확한 셀 교실은 동점일 때 살리는 정도로만 반영.
+  if (preferred.length) addCandidate(preferred, 1);
 
-  const ranked = Array.from(counts.values()).sort((a, b) => b.count - a.count);
-  const best = ranked[0];
+  if (!scores.size) return preferred;
 
-  // 같은 요일·교시·과목에서 확인된 교실을 우선한다.
-  // 과목 전체 기준 fallback을 쓰지 않으므로 같은 과목이 다른 시간에
-  // 다른 교실을 쓰는 경우에도 잘못 섞이지 않는다.
-  if (best?.rooms?.length) return best.rooms;
+  return Array.from(scores.values())
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return formatClassrooms(a.rooms).localeCompare(formatClassrooms(b.rooms), 'ko-KR');
+    })[0].rooms;
+}
 
-  return preferred;
+function getCanonicalClassroomsForSlot(subjectId, day, period, preferredRooms = []) {
+  return getCanonicalClassroomsForSubject(subjectId, day, period, preferredRooms);
 }
 
 function getResolvedRoomsForStudentSlot(student, day, period) {
@@ -905,13 +929,13 @@ function getResolvedRoomsForStudentSlot(student, day, period) {
   const schedule = normalizeScheduleIds(student.schedule);
   const classrooms = normalizeClassrooms(student.classrooms);
   const subjectId = schedule[day][index];
+  const exactRooms = classrooms[day][index];
 
-  return getCanonicalClassroomsForSlot(
-    subjectId,
-    day,
-    period,
-    classrooms[day][index],
-  );
+  // 개인 시간표/같이 듣는 친구 화면은 해당 학생의 실제 셀 값을 우선.
+  if (exactRooms.length) return exactRooms;
+
+  // 누락된 경우에만 과목 기준 합의값으로 보완.
+  return getCanonicalClassroomsForSubject(subjectId, day, period, []);
 }
 
 function renderMyLookupSchedule() {
@@ -971,11 +995,11 @@ function renderTimeLookup() {
     const count = document.createElement('span');
     count.textContent = `${group.students.length}명`;
     heading.append(subject, count);
-    const resolvedRooms = getCanonicalClassroomsForSlot(
+    const resolvedRooms = getCanonicalClassroomsForSubject(
       group.subjectId,
       day,
       period,
-      group.students.find((studentRef) => Array.isArray(studentRef.classrooms) && studentRef.classrooms.length)?.classrooms || [],
+      [],
     );
 
     const classrooms = document.createElement('div');
@@ -1665,9 +1689,9 @@ async function uploadChatImage(file) {
   const roomId = activeChatRoomId();
   const form = new FormData();
   form.append('action', 'upload');
-  form.append('room_type', state.activeChatType);
-  form.append('room_id', String(roomId));
-  if (state.activeChatType === 'direct') form.append('thread_id', String(roomId));
+  form.append('mode', state.activeChatType === 'group' ? 'group' : 'direct');
+  if (state.activeChatType === 'group') form.append('group_id', String(roomId));
+  else form.append('thread_id', String(roomId));
   form.append('file', file, file.name || 'photo');
   const response = await chatMediaRequest(form, true);
   const data = await response.json();
@@ -1695,9 +1719,9 @@ async function loadChatImage(imagePath, img) {
     const roomId = activeChatRoomId();
     const response = await chatMediaRequest({
       action: 'signed_url',
-      room_type: state.activeChatType,
-      room_id: roomId,
+      mode: state.activeChatType === 'group' ? 'group' : 'direct',
       thread_id: state.activeChatType === 'direct' ? roomId : undefined,
+      group_id: state.activeChatType === 'group' ? roomId : undefined,
       path: imagePath,
     });
     const data = await response.json();
@@ -1731,20 +1755,32 @@ function closeChatImageLightbox() {
 function updateChatRoomStatus() {
   const isGroup = state.activeChatType === 'group';
   if (!isGroup && !state.activeChatPeer) return;
-  elements.chatRoomKind.textContent = isGroup ? '단체채팅' : '1:1 채팅';
-  elements.chatPeerTitle.textContent = isGroup ? state.activeGroupName : `${state.activeChatPeer.name} (${state.activeChatPeer.studentNo})`;
-  elements.chatRoomInfoBtn.disabled = !isGroup;
-  elements.chatReadStatus.textContent = isGroup
-    ? String(state.peerTyping || '')
-    : (state.peerTyping ? '입력 중...' : formatRelativeReadAt(state.directOtherReadAt));
-  elements.chatReadStatus.classList.toggle('is-typing', Boolean(state.peerTyping));
-  elements.chatBlockNotice.hidden = isGroup || !state.chatBlocked;
-  elements.chatInput.disabled = !isGroup && state.chatBlocked;
-  elements.chatSendBtn.disabled = !isGroup && state.chatBlocked;
+
+  if (elements.chatRoomKind) elements.chatRoomKind.textContent = isGroup ? '단체채팅' : '1:1 채팅';
+  if (elements.chatPeerTitle) {
+    elements.chatPeerTitle.textContent = isGroup
+      ? state.activeGroupName
+      : `${state.activeChatPeer.name} (${state.activeChatPeer.studentNo})`;
+  }
+  if (elements.chatRoomInfoBtn) elements.chatRoomInfoBtn.disabled = !isGroup;
+
+  if (elements.chatReadStatus) {
+    elements.chatReadStatus.textContent = isGroup
+      ? String(state.peerTyping || '')
+      : (state.peerTyping ? '입력 중...' : formatRelativeReadAt(state.directOtherReadAt));
+    elements.chatReadStatus.classList.toggle('is-typing', Boolean(state.peerTyping));
+  }
+
+  if (elements.chatBlockNotice) elements.chatBlockNotice.hidden = isGroup || !state.chatBlocked;
+  if (elements.chatInput) elements.chatInput.disabled = !isGroup && state.chatBlocked;
+  if (elements.chatSendBtn) elements.chatSendBtn.disabled = !isGroup && state.chatBlocked;
   if (elements.chatPhotoBtn) elements.chatPhotoBtn.disabled = !isGroup && state.chatBlocked;
-  elements.chatBlockBtn.hidden = isGroup;
-  elements.chatReportBtn.hidden = isGroup;
-  if (!isGroup) elements.chatBlockBtn.textContent = state.chatBlocked ? '차단 해제' : '차단';
+
+  if (elements.chatBlockBtn) {
+    elements.chatBlockBtn.hidden = isGroup;
+    if (!isGroup) elements.chatBlockBtn.textContent = state.chatBlocked ? '차단 해제' : '차단';
+  }
+  if (elements.chatReportBtn) elements.chatReportBtn.hidden = isGroup;
 }
 
 function renderChatRoom() {
