@@ -438,26 +438,6 @@ input::placeholder {
   line-height: 1.55;
 }
 
-.free-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin: 18px 0 12px;
-  padding: 14px 16px;
-  border-radius: 14px;
-  background: var(--surface-soft);
-}
-
-.free-summary span {
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
-.free-summary strong {
-  color: var(--primary);
-  font-size: 1.3rem;
-}
 
 .bottom-nav {
   position: fixed;
@@ -569,8 +549,7 @@ input::placeholder {
 @media (min-width: 1024px) {
   .form-card,
   .analysis-card,
-  .schedule-detail,
-  #freeView > .card {
+  .schedule-detail {
     padding: 28px;
   }
 }
@@ -777,4 +756,62 @@ input::placeholder {
   .account-actions {
     justify-content: flex-start;
   }
+}
+
+/* 같이 듣는 친구 */
+.classmates-overview {
+  display: grid;
+  gap: 14px;
+}
+
+.classmate-subject-card {
+  display: grid;
+  gap: 14px;
+}
+
+.classmate-subject-card__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 0;
+}
+
+.classmate-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.classmate-slot-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.classmate-slot {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  color: #475467;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.classmate-subject-card .classmate-list .empty-state {
+  width: 100%;
+  padding: 16px 12px;
 }

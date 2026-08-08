@@ -111,3 +111,54 @@ export function findClassmatesForCell(students, subjectsById, studentNo, day, pe
     classmates: studentsInSameSlot.filter((row) => row.studentNo !== String(studentNo)),
   };
 }
+
+export function findMyClassmatesBySubject(students, subjectsById, studentNo) {
+  const targetNo = String(studentNo ?? '').trim();
+  const all = Array.isArray(students) ? students : [];
+  const me = all.find((student) => String(student?.studentNo ?? student?.student_no ?? '').trim() === targetNo);
+  if (!me) return [];
+
+  const mySchedule = normalizeScheduleIds(me.schedule);
+  const groups = new Map();
+
+  for (const day of DAYS) {
+    PERIODS.forEach((period, index) => {
+      const subjectId = mySchedule[day][index];
+      if (subjectId === FREE_SUBJECT_ID || subjectId === UNKNOWN_SUBJECT_ID) return;
+
+      if (!groups.has(subjectId)) {
+        groups.set(subjectId, {
+          subjectId,
+          subject: subjectName(subjectsById, subjectId),
+          slots: [],
+          classmatesByNo: new Map(),
+        });
+      }
+
+      const group = groups.get(subjectId);
+      group.slots.push({ day, period });
+
+      for (const student of all) {
+        const otherNo = String(student?.studentNo ?? student?.student_no ?? '').trim();
+        if (!otherNo || otherNo === targetNo) continue;
+        const otherSchedule = normalizeScheduleIds(student?.schedule);
+        if (otherSchedule[day][index] !== subjectId) continue;
+        group.classmatesByNo.set(otherNo, {
+          studentNo: otherNo,
+          name: normalizeRosterName(student?.name),
+        });
+      }
+    });
+  }
+
+  return Array.from(groups.values())
+    .map((group) => ({
+      subjectId: group.subjectId,
+      subject: group.subject,
+      slots: group.slots,
+      classmates: Array.from(group.classmatesByNo.values())
+        .filter((student) => student.name)
+        .sort((a, b) => a.studentNo.localeCompare(b.studentNo, 'ko-KR')),
+    }))
+    .sort((a, b) => a.subject.localeCompare(b.subject, 'ko-KR'));
+}

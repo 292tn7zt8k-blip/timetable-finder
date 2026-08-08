@@ -9,8 +9,8 @@ import {
   hasUnknownSubject,
   buildStudentLabel,
   groupStudentsBySubject,
-  findFreeStudents,
   findClassmatesForCell,
+  findMyClassmatesBySubject,
 } from './core.js';
 
 const SESSION_KEY = 'timetableSessionToken';
@@ -53,11 +53,7 @@ const elements = {
   classmateTitle: document.getElementById('classmateTitle'),
   classmateMeta: document.getElementById('classmateMeta'),
   classmateList: document.getElementById('classmateList'),
-  freeDay: document.getElementById('freeDay'),
-  freePeriod: document.getElementById('freePeriod'),
-  freeLookupBtn: document.getElementById('freeLookupBtn'),
-  freeCount: document.getElementById('freeCount'),
-  freeResults: document.getElementById('freeResults'),
+  myClassmateResults: document.getElementById('myClassmateResults'),
   toast: document.getElementById('toast'),
 };
 
@@ -78,9 +74,7 @@ const state = {
 };
 
 fillSelect(elements.lookupDay, DAYS, (day) => `${day}요일`);
-fillSelect(elements.freeDay, DAYS, (day) => `${day}요일`);
 fillSelect(elements.lookupPeriod, PERIODS, (period) => `${period}교시`);
-fillSelect(elements.freePeriod, PERIODS, (period) => `${period}교시`);
 bindEvents();
 await bootstrap();
 setInterval(renderQuota, 1000);
@@ -130,7 +124,7 @@ function bindEvents() {
         return;
       }
       switchView(button.dataset.nav);
-      if (button.dataset.nav === 'lookup' || button.dataset.nav === 'free') await refreshStudents();
+      if (button.dataset.nav === 'lookup' || button.dataset.nav === 'classmates') await refreshStudents();
     });
   });
 
@@ -154,9 +148,6 @@ function bindEvents() {
   elements.lookupDay.addEventListener('change', renderTimeLookup);
   elements.lookupPeriod.addEventListener('change', renderTimeLookup);
   elements.timeLookupBtn.addEventListener('click', async () => { await refreshStudents(); renderTimeLookup(); });
-  elements.freeDay.addEventListener('change', renderFreeLookup);
-  elements.freePeriod.addEventListener('change', renderFreeLookup);
-  elements.freeLookupBtn.addEventListener('click', async () => { await refreshStudents(); renderFreeLookup(); });
 }
 
 async function bootstrap() {
@@ -592,7 +583,7 @@ async function saveTimetable() {
 function renderAllLookups() {
   renderStudentList();
   renderTimeLookup();
-  renderFreeLookup();
+  renderMyClassmates();
   if (state.selectedStudentNo) {
     const exists = state.students.some((student) => student.studentNo === state.selectedStudentNo);
     if (exists) selectStudent(state.selectedStudentNo, false);
@@ -691,26 +682,73 @@ function renderClassmatesForCell(studentNo, day, period) {
   elements.classmatePanel.hidden = false;
 }
 
-function renderFreeLookup() {
+function renderMyClassmates() {
   if (!state.profile?.registered) return;
-  const day = elements.freeDay.value || DAYS[0];
-  const period = Number(elements.freePeriod.value || 1);
-  const freeStudents = findFreeStudents(state.students, state.subjectsById, day, period);
-  elements.freeCount.textContent = `${freeStudents.length}명`;
-  elements.freeResults.replaceChildren();
-  if (!freeStudents.length) { elements.freeResults.appendChild(createEmptyState(`${day}요일 ${period}교시에 공강인 학생이 없습니다.`)); return; }
-  for (const row of freeStudents) {
-    const student = state.students.find((item) => item.studentNo === row.studentNo) || row;
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'result-item is-free';
-    const name = document.createElement('strong');
-    name.textContent = buildStudentLabel(student, state.students);
-    const meta = document.createElement('span');
-    meta.textContent = `${day}요일 ${period}교시 · 공강`;
-    item.append(name, meta);
-    item.addEventListener('click', () => selectStudent(row.studentNo));
-    elements.freeResults.appendChild(item);
+
+  const groups = findMyClassmatesBySubject(
+    state.students,
+    state.subjectsById,
+    state.profile.student_no,
+  );
+
+  elements.myClassmateResults.replaceChildren();
+
+  if (!groups.length) {
+    elements.myClassmateResults.appendChild(createEmptyState('표시할 수업이 없습니다. 내 시간표를 확인해주세요.'));
+    return;
+  }
+
+  for (const group of groups) {
+    const card = document.createElement('article');
+    card.className = 'card classmate-subject-card';
+
+    const heading = document.createElement('div');
+    heading.className = 'classmate-subject-card__heading';
+
+    const titleWrap = document.createElement('div');
+    const kicker = document.createElement('p');
+    kicker.className = 'section-kicker';
+    kicker.textContent = '내 수업';
+    const title = document.createElement('h3');
+    title.textContent = group.subject;
+    titleWrap.append(kicker, title);
+
+    const count = document.createElement('span');
+    count.className = 'classmate-count';
+    count.textContent = `${group.classmates.length}명`;
+    heading.append(titleWrap, count);
+
+    const slotList = document.createElement('div');
+    slotList.className = 'classmate-slot-list';
+    for (const slot of group.slots) {
+      const badge = document.createElement('span');
+      badge.className = 'classmate-slot';
+      badge.textContent = `${slot.day}요일 ${slot.period}교시`;
+      slotList.appendChild(badge);
+    }
+
+    const friends = document.createElement('div');
+    friends.className = 'classmate-list';
+
+    if (!group.classmates.length) {
+      friends.appendChild(createEmptyState('같은 시간에 이 과목을 함께 듣는 친구가 없습니다.'));
+    } else {
+      for (const studentRef of group.classmates) {
+        const student = state.students.find((item) => item.studentNo === studentRef.studentNo) || studentRef;
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'student-chip';
+        chip.textContent = buildStudentLabel(student, state.students);
+        chip.addEventListener('click', () => {
+          switchView('lookup');
+          selectStudent(studentRef.studentNo);
+        });
+        friends.appendChild(chip);
+      }
+    }
+
+    card.append(heading, slotList, friends);
+    elements.myClassmateResults.appendChild(card);
   }
 }
 
