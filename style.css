@@ -500,7 +500,7 @@ input::placeholder {
   background: #8f201d;
 }
 
-@media (min-width: 768px) {
+@media (min-width: 1200px) {
   .hero__inner {
     padding: 42px 0 34px;
   }
@@ -1214,4 +1214,34 @@ body.is-lightbox-open { overflow: hidden; }
 .chat-bubble,
 .chat-image-message {
   overflow-anchor: none;
+}
+
+/* ===== 2026-08-08 phone/tablet layout guard ===== */
+@media (max-width: 1199px) {
+  .lookup-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .section-heading {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .section-heading > p {
+    justify-self: start !important;
+    max-width: none !important;
+    text-align: left !important;
+  }
+
+  .bottom-nav {
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+    border-bottom: 0 !important;
+    border-radius: 0 !important;
+    transform: none !important;
+  }
 }
