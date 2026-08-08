@@ -20,7 +20,7 @@ import {
   formatRelativeReadAt,
   formatChatListTime,
   isChatMessageUnread,
-} from './core.js?v=20260808-2048';
+} from './core.js?v=20260808-2235';
 
 const SESSION_KEY = 'timetableSessionToken';
 const COOLDOWN_MS = 10 * 60 * 1000;
@@ -580,7 +580,12 @@ async function analyzeTimetable() {
     await loadProfile();
     renderAccessState();
     elements.analysisPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    showToast('AI 분석이 끝났습니다. 모든 칸을 확인해주세요.');
+    const ruleIssues = updateTimetableRuleWarnings();
+    if (ruleIssues.length) {
+      showToast('AI가 일부 시간표를 잘못 인식했을 수 있습니다. 표시된 부분을 확인하고 수정해주세요.', true);
+    } else {
+      showToast('AI 분석이 끝났습니다. 모든 칸을 확인해주세요.');
+    }
   } catch (error) {
     try { await loadProfile(); } catch {}
     if (error?.attemptConsumed) {
@@ -637,8 +642,71 @@ function fileToDataUrl(file) {
   });
 }
 
+const FIXED_TIMETABLE_RULES = [
+  { day: '월', period: 7, expected: FREE_SUBJECT_ID, label: '월요일 7교시는 공강' },
+  { day: '목', period: 7, expected: FREE_SUBJECT_ID, label: '목요일 7교시는 공강' },
+  { day: '금', period: 7, expected: FREE_SUBJECT_ID, label: '금요일 7교시는 공강' },
+  { day: '수', period: 6, expected: 'CREATIVE_ACTIVITY', label: '수요일 6교시는 창체' },
+  { day: '수', period: 7, expected: 'CREATIVE_ACTIVITY', label: '수요일 7교시는 창체' },
+];
+
+function getTimetableRuleIssues(schedule) {
+  const normalized = normalizeScheduleIds(schedule);
+  return FIXED_TIMETABLE_RULES.filter((rule) => {
+    const index = rule.period - 1;
+    return normalized?.[rule.day]?.[index] !== rule.expected;
+  });
+}
+
+function updateTimetableRuleWarnings() {
+  if (!elements.editableScheduleWrap) return [];
+
+  const schedule = collectEditedSchedule();
+  const issues = getTimetableRuleIssues(schedule);
+  const issueKeys = new Set(issues.map((issue) => `${issue.day}-${issue.period}`));
+
+  elements.editableScheduleWrap.querySelectorAll('.schedule-select').forEach((select) => {
+    const key = `${select.dataset.day}-${select.dataset.period}`;
+    const isRuleIssue = issueKeys.has(key);
+    select.classList.toggle('is-rule-warning', isRuleIssue);
+
+    const td = select.closest('td');
+    if (td) td.classList.toggle('has-rule-warning', isRuleIssue);
+  });
+
+  let warning = elements.editableScheduleWrap.parentElement?.querySelector('.timetable-rule-warning');
+
+  if (issues.length) {
+    if (!warning) {
+      warning = document.createElement('div');
+      warning.className = 'timetable-rule-warning';
+      warning.setAttribute('role', 'status');
+
+      const title = document.createElement('strong');
+      title.textContent = 'AI가 일부 시간표를 잘못 인식했을 수 있습니다.';
+
+      const message = document.createElement('span');
+      message.className = 'timetable-rule-warning__message';
+
+      warning.append(title, message);
+      elements.editableScheduleWrap.parentElement?.insertBefore(warning, elements.editableScheduleWrap);
+    }
+
+    const message = warning.querySelector('.timetable-rule-warning__message');
+    if (message) {
+      message.textContent = ` 표시된 부분을 확인하고 수정해주세요. (${issues.map((issue) => issue.label).join(' · ')})`;
+    }
+    warning.hidden = false;
+  } else if (warning) {
+    warning.hidden = true;
+  }
+
+  return issues;
+}
+
 function renderEditableSchedule(schedule, classrooms = state.draftClassrooms) {
   elements.editableScheduleWrap.replaceChildren(buildScheduleTable(schedule, classrooms, true));
+  updateTimetableRuleWarnings();
 }
 
 function renderReadonlySchedule(schedule, classrooms, onCellClick, roomResolver = null) {
@@ -690,7 +758,10 @@ function buildScheduleTable(schedule, classrooms, editable, onCellClick, roomRes
           option.selected = subject.subject_id === subjectId;
           select.appendChild(option);
         }
-        select.addEventListener('change', () => select.classList.toggle('is-unknown', select.value === UNKNOWN_SUBJECT_ID));
+        select.addEventListener('change', () => {
+          select.classList.toggle('is-unknown', select.value === UNKNOWN_SUBJECT_ID);
+          updateTimetableRuleWarnings();
+        });
         const roomSelect = document.createElement('select');
         roomSelect.className = 'classroom-select';
         roomSelect.multiple = true;
@@ -771,6 +842,10 @@ async function saveTimetable() {
   }
   const schedule = collectEditedSchedule();
   const classrooms = collectEditedClassrooms();
+  const ruleIssues = updateTimetableRuleWarnings();
+  if (ruleIssues.length) {
+    showToast('고정 시간표 규칙과 다른 칸이 있습니다. AI 인식 오류가 아닌지 한 번 더 확인해주세요.');
+  }
   if (hasUnknownSubject(schedule)) {
     showToast('미확인 칸이 있습니다. 모든 칸에서 실제 과목 또는 공강을 선택해주세요.', true);
     return;

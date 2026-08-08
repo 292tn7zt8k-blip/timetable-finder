@@ -1371,3 +1371,30 @@ body.is-lightbox-open { overflow: hidden; }
   font-size: 0.78rem;
   line-height: 1.35;
 }
+
+
+/* ===== AI 시간표 고정 규칙 검증 경고 ===== */
+.timetable-rule-warning {
+  margin: 0 0 12px;
+  padding: 11px 13px;
+  border: 1px solid #f59e0b;
+  border-radius: 12px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.timetable-rule-warning strong {
+  font-weight: 800;
+}
+
+.schedule-select.is-rule-warning {
+  border-color: #f59e0b;
+  background: #fff7ed;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.14);
+}
+
+.schedule-table td.has-rule-warning {
+  background: rgba(255, 247, 237, 0.55);
+}
