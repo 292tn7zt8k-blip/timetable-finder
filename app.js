@@ -11,6 +11,7 @@ import {
   groupStudentsBySubject,
   findClassmatesForCell,
   findMyClassmatesBySubject,
+  findSharedClassesWithStudent,
 } from './core.js';
 
 const SESSION_KEY = 'timetableSessionToken';
@@ -54,6 +55,11 @@ const elements = {
   classmateMeta: document.getElementById('classmateMeta'),
   classmateList: document.getElementById('classmateList'),
   myClassmateResults: document.getElementById('myClassmateResults'),
+  friendSharedPanel: document.getElementById('friendSharedPanel'),
+  friendSharedTitle: document.getElementById('friendSharedTitle'),
+  friendSharedMeta: document.getElementById('friendSharedMeta'),
+  friendSharedClasses: document.getElementById('friendSharedClasses'),
+  friendFullScheduleBtn: document.getElementById('friendFullScheduleBtn'),
   toast: document.getElementById('toast'),
 };
 
@@ -71,6 +77,7 @@ const state = {
   selectedStudentNo: '',
   previewUrl: '',
   toastTimer: null,
+  selectedClassmateNo: '',
 };
 
 fillSelect(elements.lookupDay, DAYS, (day) => `${day}요일`);
@@ -141,6 +148,12 @@ function bindEvents() {
     if (event.key === 'Enter') submitPin();
   });
   elements.logoutBtn.addEventListener('click', logout);
+  elements.friendFullScheduleBtn.addEventListener('click', () => {
+    if (!state.selectedClassmateNo) return;
+    const targetNo = state.selectedClassmateNo;
+    switchView('lookup');
+    selectStudent(targetNo);
+  });
   elements.scheduleImage.addEventListener('change', previewImage);
   elements.analyzeBtn.addEventListener('click', analyzeTimetable);
   elements.saveBtn.addEventListener('click', saveTimetable);
@@ -272,6 +285,8 @@ function clearSession() {
   state.students = [];
   state.draftSchedule = null;
   state.selectedStudentNo = '';
+  state.selectedClassmateNo = '';
+  if (elements.friendSharedPanel) elements.friendSharedPanel.hidden = true;
 }
 
 async function loadProfile() {
@@ -740,8 +755,7 @@ function renderMyClassmates() {
         chip.className = 'student-chip';
         chip.textContent = buildStudentLabel(student, state.students);
         chip.addEventListener('click', () => {
-          switchView('lookup');
-          selectStudent(studentRef.studentNo);
+          renderFriendSharedClasses(studentRef.studentNo);
         });
         friends.appendChild(chip);
       }
@@ -750,6 +764,44 @@ function renderMyClassmates() {
     card.append(heading, slotList, friends);
     elements.myClassmateResults.appendChild(card);
   }
+}
+
+
+function renderFriendSharedClasses(studentNo) {
+  if (!state.profile?.registered) return;
+  const friend = state.students.find((student) => student.studentNo === String(studentNo));
+  if (!friend) return;
+
+  const shared = findSharedClassesWithStudent(
+    state.students,
+    state.subjectsById,
+    state.profile.student_no,
+    friend.studentNo,
+  );
+
+  state.selectedClassmateNo = friend.studentNo;
+  elements.friendSharedTitle.textContent = `${buildStudentLabel(friend, state.students)}와 같이 듣는 수업`;
+  elements.friendSharedMeta.textContent = `${shared.length}개 과목`;
+  elements.friendSharedClasses.replaceChildren();
+
+  if (!shared.length) {
+    elements.friendSharedClasses.appendChild(createEmptyState('같은 요일·교시·과목으로 겹치는 수업이 없습니다.'));
+  } else {
+    for (const group of shared) {
+      const row = document.createElement('div');
+      row.className = 'friend-shared-class';
+      const subject = document.createElement('strong');
+      subject.textContent = group.subject;
+      const slots = document.createElement('span');
+      slots.textContent = group.slots.map((slot) => `${slot.day} ${slot.period}교시`).join(' · ');
+      row.append(subject, slots);
+      elements.friendSharedClasses.appendChild(row);
+    }
+  }
+
+  elements.friendFullScheduleBtn.textContent = `${friend.name} 전체 시간표 보기`;
+  elements.friendSharedPanel.hidden = false;
+  elements.friendSharedPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function switchView(viewName) {

@@ -815,3 +815,48 @@ input::placeholder {
   width: 100%;
   padding: 16px 12px;
 }
+
+
+.friend-shared-panel {
+  display: grid;
+  gap: 14px;
+  border-color: #d7e3fb;
+}
+
+.friend-shared-panel__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.friend-shared-panel__heading > span {
+  color: var(--primary-dark);
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.friend-shared-classes {
+  display: grid;
+  gap: 9px;
+}
+
+.friend-shared-class {
+  display: grid;
+  gap: 4px;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.friend-shared-class strong {
+  font-size: 0.94rem;
+}
+
+.friend-shared-class span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}

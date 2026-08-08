@@ -27,3 +27,7 @@ GitHub Pages + Supabase + OpenAI Edge Function 기반 시간표 공유 사이트
 - `core.js`
 
 학생 명단 SQL, OpenAI 키 등 비공개 자료는 GitHub에 올리지 마세요.
+
+## 같이 듣는 친구
+
+- `같이 듣는 친구`에서 친구 이름을 누르면 나와 그 친구가 같은 요일·교시·과목으로 함께 듣는 수업을 확인할 수 있습니다.

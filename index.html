@@ -151,6 +151,14 @@
           <p>내 시간표와 같은 요일·교시·과목이 겹치는 친구를 과목별로 보여줍니다.</p>
         </div>
         <div class="classmates-overview" id="myClassmateResults" aria-live="polite"></div>
+        <article class="card friend-shared-panel" id="friendSharedPanel" hidden>
+          <div class="friend-shared-panel__heading">
+            <div><p class="section-kicker">함께 듣는 수업</p><h3 id="friendSharedTitle">친구와 같이 듣는 수업</h3></div>
+            <span id="friendSharedMeta">0개 과목</span>
+          </div>
+          <div class="friend-shared-classes" id="friendSharedClasses"></div>
+          <button class="button button--secondary button--full" id="friendFullScheduleBtn" type="button">전체 시간표 보기</button>
+        </article>
       </section>
     </main>
 

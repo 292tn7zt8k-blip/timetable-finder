@@ -162,3 +162,35 @@ export function findMyClassmatesBySubject(students, subjectsById, studentNo) {
     }))
     .sort((a, b) => a.subject.localeCompare(b.subject, 'ko-KR'));
 }
+
+export function findSharedClassesWithStudent(students, subjectsById, myStudentNo, otherStudentNo) {
+  const myNo = String(myStudentNo ?? '').trim();
+  const otherNo = String(otherStudentNo ?? '').trim();
+  const all = Array.isArray(students) ? students : [];
+  const me = all.find((student) => String(student?.studentNo ?? student?.student_no ?? '').trim() === myNo);
+  const other = all.find((student) => String(student?.studentNo ?? student?.student_no ?? '').trim() === otherNo);
+  if (!me || !other || !myNo || !otherNo || myNo === otherNo) return [];
+
+  const mine = normalizeScheduleIds(me.schedule);
+  const theirs = normalizeScheduleIds(other.schedule);
+  const groups = new Map();
+
+  for (const day of DAYS) {
+    PERIODS.forEach((period, index) => {
+      const subjectId = mine[day][index];
+      if (subjectId === FREE_SUBJECT_ID || subjectId === UNKNOWN_SUBJECT_ID) return;
+      if (theirs[day][index] !== subjectId) return;
+      if (!groups.has(subjectId)) {
+        groups.set(subjectId, {
+          subjectId,
+          subject: subjectName(subjectsById, subjectId),
+          slots: [],
+        });
+      }
+      groups.get(subjectId).slots.push({ day, period });
+    });
+  }
+
+  return Array.from(groups.values())
+    .sort((a, b) => a.subject.localeCompare(b.subject, 'ko-KR'));
+}
