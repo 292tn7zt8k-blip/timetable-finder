@@ -200,3 +200,23 @@ export function findSharedClassesWithStudent(students, subjectsById, myStudentNo
   return Array.from(groups.values())
     .sort((a, b) => a.subject.localeCompare(b.subject, 'ko-KR'));
 }
+
+export function searchRosterStudents(roster, query, ownStudentNo = '') {
+  const normalizedQuery = String(query ?? '').trim().toLocaleLowerCase('ko-KR');
+  if (!normalizedQuery) return [];
+
+  const ownNo = String(ownStudentNo ?? '').trim();
+  const rows = (Array.isArray(roster) ? roster : [])
+    .map((row) => ({
+      studentNo: String(row?.studentNo ?? row?.student_no ?? '').trim(),
+      name: normalizeRosterName(row?.name ?? row?.normalized_name),
+      registered: Boolean(row?.registered),
+    }))
+    .filter((row) => row.studentNo && row.name && row.studentNo !== ownNo)
+    .filter((row) => `${row.name} ${row.studentNo}`.toLocaleLowerCase('ko-KR').includes(normalizedQuery));
+
+  return rows
+    .sort((a, b) => a.studentNo.localeCompare(b.studentNo, 'ko-KR'))
+    .slice(0, 30);
+}
+

@@ -12,6 +12,7 @@ import {
   findClassmatesForCell,
   findMyClassmatesBySubject,
   findSharedClassesWithStudent,
+  searchRosterStudents,
 } from './core.js';
 
 const SESSION_KEY = 'timetableSessionToken';
@@ -54,6 +55,8 @@ const elements = {
   classmateTitle: document.getElementById('classmateTitle'),
   classmateMeta: document.getElementById('classmateMeta'),
   classmateList: document.getElementById('classmateList'),
+  classmateSearch: document.getElementById('classmateSearch'),
+  classmateSearchResults: document.getElementById('classmateSearchResults'),
   myClassmateResults: document.getElementById('myClassmateResults'),
   friendSharedPanel: document.getElementById('friendSharedPanel'),
   friendSharedTitle: document.getElementById('friendSharedTitle'),
@@ -73,6 +76,7 @@ const state = {
   subjects: [],
   subjectsById: new Map(),
   students: [],
+  roster: [],
   draftSchedule: null,
   selectedStudentNo: '',
   previewUrl: '',
@@ -131,7 +135,8 @@ function bindEvents() {
         return;
       }
       switchView(button.dataset.nav);
-      if (button.dataset.nav === 'lookup' || button.dataset.nav === 'classmates') await refreshStudents();
+      if (button.dataset.nav === 'lookup') await refreshStudents();
+      if (button.dataset.nav === 'classmates') await refreshClassmateData();
     });
   });
 
@@ -158,6 +163,7 @@ function bindEvents() {
   elements.analyzeBtn.addEventListener('click', analyzeTimetable);
   elements.saveBtn.addEventListener('click', saveTimetable);
   elements.lookupSearch.addEventListener('input', renderStudentList);
+  elements.classmateSearch.addEventListener('input', renderClassmateSearchResults);
   elements.lookupDay.addEventListener('change', renderTimeLookup);
   elements.lookupPeriod.addEventListener('change', renderTimeLookup);
   elements.timeLookupBtn.addEventListener('click', async () => { await refreshStudents(); renderTimeLookup(); });
@@ -174,6 +180,7 @@ async function bootstrap() {
     await loadSubjects();
     if (state.profile.registered) {
       await refreshStudents();
+      await loadRosterStudents();
       loadOwnScheduleIntoEditor();
     }
   } catch {
@@ -283,6 +290,7 @@ function clearSession() {
   state.subjects = [];
   state.subjectsById = new Map();
   state.students = [];
+  state.roster = [];
   state.draftSchedule = null;
   state.selectedStudentNo = '';
   state.selectedClassmateNo = '';
@@ -320,6 +328,35 @@ async function refreshStudents() {
   }));
   renderAllLookups();
   return state.students;
+}
+
+
+async function loadRosterStudents() {
+  if (!state.profile?.registered || !state.sessionToken) {
+    state.roster = [];
+    renderClassmateSearchResults();
+    return [];
+  }
+
+  const data = await rpc('list_student_roster_for_search', {
+    p_session_token: state.sessionToken,
+  });
+
+  state.roster = (Array.isArray(data) ? data : []).map((row) => ({
+    studentNo: String(row.student_no),
+    name: normalizeRosterName(row.name),
+    registered: Boolean(row.registered),
+  }));
+
+  renderClassmateSearchResults();
+  return state.roster;
+}
+
+async function refreshClassmateData() {
+  await refreshStudents();
+  await loadRosterStudents();
+  renderMyClassmates();
+  renderClassmateSearchResults();
 }
 
 function loadOwnScheduleIntoEditor() {
@@ -599,6 +636,7 @@ function renderAllLookups() {
   renderStudentList();
   renderTimeLookup();
   renderMyClassmates();
+  renderClassmateSearchResults();
   if (state.selectedStudentNo) {
     const exists = state.students.some((student) => student.studentNo === state.selectedStudentNo);
     if (exists) selectStudent(state.selectedStudentNo, false);
@@ -695,6 +733,70 @@ function renderClassmatesForCell(studentNo, day, period) {
     }
   }
   elements.classmatePanel.hidden = false;
+}
+
+
+function renderClassmateSearchResults() {
+  if (!state.profile?.registered) return;
+
+  const query = String(elements.classmateSearch.value || '').trim();
+  elements.classmateSearchResults.replaceChildren();
+
+  if (!query) {
+    const hint = document.createElement('p');
+    hint.className = 'classmate-search-hint';
+    hint.textContent = '친구 이름이나 학번을 입력하면 등록 여부와 같이 듣는 수업을 확인할 수 있습니다.';
+    elements.classmateSearchResults.appendChild(hint);
+    return;
+  }
+
+  const results = searchRosterStudents(
+    state.roster,
+    query,
+    state.profile.student_no,
+  );
+
+  if (!results.length) {
+    elements.classmateSearchResults.appendChild(createEmptyState('해당 이름 또는 학번의 학생을 찾지 못했습니다.'));
+    return;
+  }
+
+  for (const result of results) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `classmate-search-result${result.registered ? '' : ' is-unregistered'}`;
+
+    const main = document.createElement('div');
+    const name = document.createElement('strong');
+    name.textContent = `${result.name} (${result.studentNo})`;
+    const status = document.createElement('span');
+    status.textContent = result.registered
+      ? '시간표 등록됨 · 눌러서 같이 듣는 수업 확인'
+      : '아직 시간표를 등록하지 않았어요';
+    main.append(name, status);
+
+    const badge = document.createElement('span');
+    badge.className = `registration-status${result.registered ? ' is-registered' : ''}`;
+    badge.textContent = result.registered ? '등록됨' : '미등록';
+
+    button.append(main, badge);
+    button.addEventListener('click', () => {
+      if (!result.registered) {
+        showToast(`${result.name}님은 아직 시간표를 등록하지 않았어요.`);
+        return;
+      }
+
+      const registeredStudent = state.students.find((student) => student.studentNo === result.studentNo);
+      if (!registeredStudent) {
+        showToast('등록 정보가 갱신 중입니다. 잠시 후 다시 확인해주세요.', true);
+        return;
+      }
+
+      renderFriendSharedClasses(result.studentNo);
+    });
+
+    elements.classmateSearchResults.appendChild(button);
+  }
 }
 
 function renderMyClassmates() {

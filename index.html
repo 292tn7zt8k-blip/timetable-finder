@@ -150,6 +150,16 @@
           <div><p class="section-kicker">친구</p><h2 id="classmates-title">같이 듣는 친구</h2></div>
           <p>내 시간표와 같은 요일·교시·과목이 겹치는 친구를 과목별로 보여줍니다.</p>
         </div>
+        <article class="card classmate-search-card">
+          <div class="card-heading">
+            <div><p class="section-kicker">학생 검색</p><h3>친구 이름 또는 학번 검색</h3></div>
+          </div>
+          <div class="field-group">
+            <label for="classmateSearch">이름 / 학번</label>
+            <input id="classmateSearch" type="search" placeholder="예: 김민수 / 2314" autocomplete="off">
+          </div>
+          <div class="classmate-search-results" id="classmateSearchResults" aria-live="polite"></div>
+        </article>
         <div class="classmates-overview" id="myClassmateResults" aria-live="polite"></div>
         <article class="card friend-shared-panel" id="friendSharedPanel" hidden>
           <div class="friend-shared-panel__heading">

@@ -860,3 +860,90 @@ input::placeholder {
   font-size: 0.82rem;
   line-height: 1.45;
 }
+
+/* 같이 듣는 친구 - 전체 학생 검색 */
+.classmate-search-card {
+  display: grid;
+  gap: 14px;
+}
+
+.classmate-search-card .card-heading {
+  margin-bottom: 0;
+}
+
+.classmate-search-results {
+  display: grid;
+  gap: 9px;
+}
+
+.classmate-search-hint {
+  margin: 0;
+  padding: 12px 2px 2px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.classmate-search-result {
+  width: 100%;
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 11px 13px;
+  background: var(--surface-soft);
+  color: var(--text);
+  text-align: left;
+}
+
+.classmate-search-result:hover,
+.classmate-search-result:focus-visible {
+  border-color: #b8c9ec;
+  background: var(--primary-soft);
+  outline: 2px solid rgba(20, 99, 255, 0.18);
+  outline-offset: 1px;
+}
+
+.classmate-search-result.is-unregistered {
+  background: #fafafa;
+}
+
+.classmate-search-result > div {
+  min-width: 0;
+}
+
+.classmate-search-result strong,
+.classmate-search-result span {
+  display: block;
+}
+
+.classmate-search-result strong {
+  font-size: 0.95rem;
+}
+
+.classmate-search-result > div > span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.79rem;
+  line-height: 1.35;
+}
+
+.registration-status {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #667085;
+  font-size: 0.75rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.registration-status.is-registered {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
