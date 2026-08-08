@@ -13,7 +13,7 @@ import {
   findMyClassmatesBySubject,
   findSharedClassesWithStudent,
   searchRosterStudents,
-} from './core.js';
+} from './core.js?v=20260808-1450';
 
 const SESSION_KEY = 'timetableSessionToken';
 const COOLDOWN_MS = 10 * 60 * 1000;
