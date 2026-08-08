@@ -93,6 +93,25 @@ const elements = {
   chatImageLightbox: document.getElementById('chatImageLightbox'),
   chatImageLightboxImage: document.getElementById('chatImageLightboxImage'),
   chatImageLightboxClose: document.getElementById('chatImageLightboxClose'),
+  groupCreateBtn: document.getElementById('groupCreateBtn'),
+  groupInviteInbox: document.getElementById('groupInviteInbox'),
+  groupCreateModal: document.getElementById('groupCreateModal'),
+  groupCreateCloseBtn: document.getElementById('groupCreateCloseBtn'),
+  groupNameInput: document.getElementById('groupNameInput'),
+  groupMemberSearch: document.getElementById('groupMemberSearch'),
+  groupMemberSearchResults: document.getElementById('groupMemberSearchResults'),
+  groupSelectedMembers: document.getElementById('groupSelectedMembers'),
+  groupCreateConfirmBtn: document.getElementById('groupCreateConfirmBtn'),
+  groupInfoModal: document.getElementById('groupInfoModal'),
+  groupInfoCloseBtn: document.getElementById('groupInfoCloseBtn'),
+  groupRenameInput: document.getElementById('groupRenameInput'),
+  groupRenameBtn: document.getElementById('groupRenameBtn'),
+  groupMemberList: document.getElementById('groupMemberList'),
+  groupInviteSearch: document.getElementById('groupInviteSearch'),
+  groupInviteSearchResults: document.getElementById('groupInviteSearchResults'),
+  groupLeaveBtn: document.getElementById('groupLeaveBtn'),
+  chatRoomInfoBtn: document.getElementById('chatRoomInfoBtn'),
+  chatRoomKind: document.getElementById('chatRoomKind'),
   toast: document.getElementById('toast'),
 };
 
@@ -114,9 +133,19 @@ const state = {
   toastTimer: null,
   selectedClassmateNo: '',
   chatThreads: [],
+  groupRooms: [],
+  groupInvites: [],
   chatMessages: [],
   activeThreadId: 0,
+  activeGroupId: 0,
+  activeChatType: 'direct',
   activeChatPeer: null,
+  activeGroupName: '',
+  activeGroupMembers: [],
+  groupSelectedInvitees: new Set(),
+  chatLastMessageId: 0,
+  directOtherReadId: 0,
+  directOtherReadAt: null,
   chatBlocked: false,
   chatThreadTimer: null,
   chatRoomTimer: null,
@@ -210,6 +239,18 @@ function bindEvents() {
   elements.chatPhotoRemoveBtn?.addEventListener('click', clearPendingChatImage);
   elements.chatImageLightboxClose?.addEventListener('click', closeChatImageLightbox);
   elements.chatImageLightbox?.addEventListener('click', (event) => { if (event.target === elements.chatImageLightbox) closeChatImageLightbox(); });
+  elements.chatSendBtn?.addEventListener('pointerdown', (event) => event.preventDefault());
+  elements.groupCreateBtn?.addEventListener('click', openGroupCreateModal);
+  elements.groupCreateCloseBtn?.addEventListener('click', closeGroupCreateModal);
+  elements.groupCreateModal?.addEventListener('click', (event) => { if (event.target === elements.groupCreateModal) closeGroupCreateModal(); });
+  elements.groupMemberSearch?.addEventListener('input', renderGroupCreateSearch);
+  elements.groupCreateConfirmBtn?.addEventListener('click', createGroupChat);
+  elements.chatRoomInfoBtn?.addEventListener('click', () => { if (state.activeChatType === 'group') openGroupInfoModal(); });
+  elements.groupInfoCloseBtn?.addEventListener('click', closeGroupInfoModal);
+  elements.groupInfoModal?.addEventListener('click', (event) => { if (event.target === elements.groupInfoModal) closeGroupInfoModal(); });
+  elements.groupRenameBtn?.addEventListener('click', renameActiveGroup);
+  elements.groupInviteSearch?.addEventListener('input', renderGroupInviteSearch);
+  elements.groupLeaveBtn?.addEventListener('click', leaveActiveGroup);
   elements.friendFullScheduleBtn.addEventListener('click', () => {
     if (!state.selectedClassmateNo) return;
     const targetNo = state.selectedClassmateNo;
@@ -805,6 +846,16 @@ function renderTimeLookup() {
     const count = document.createElement('span');
     count.textContent = `${group.students.length}명`;
     heading.append(subject, count);
+    const classroomLabels = Array.from(new Set(
+      group.students
+        .map((studentRef) => formatClassrooms(studentRef.classrooms))
+        .filter(Boolean)
+    ));
+    const classrooms = document.createElement('div');
+    classrooms.className = 'subject-group__classrooms';
+    classrooms.textContent = classroomLabels.join(' · ');
+    classrooms.hidden = group.isFree || classroomLabels.length === 0;
+
     const names = document.createElement('div');
     names.className = 'subject-group__students';
     for (const studentRef of group.students) {
@@ -812,11 +863,11 @@ function renderTimeLookup() {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'student-chip';
-      chip.textContent = `${buildStudentLabel(student, state.students)}${formatClassrooms(studentRef.classrooms) ? ` · ${formatClassrooms(studentRef.classrooms)}` : ''}`;
+      chip.textContent = buildStudentLabel(student, state.students);
       chip.addEventListener('click', () => selectStudent(studentRef.studentNo));
       names.appendChild(chip);
     }
-    section.append(heading, names);
+    section.append(heading, classrooms, names);
     elements.timeLookupResults.appendChild(section);
   }
 }
@@ -1047,38 +1098,46 @@ function renderChatSearchResults() {
   }
 }
 
+function activeChatRoomId() {
+  return state.activeChatType === 'group' ? Number(state.activeGroupId || 0) : Number(state.activeThreadId || 0);
+}
+
 function closeChatRoom() {
-  if (state.activeThreadId) setTypingState(false).catch(() => {});
+  if (activeChatRoomId()) setTypingState(false).catch(() => {});
   state.activeThreadId = 0;
+  state.activeGroupId = 0;
+  state.activeChatType = 'direct';
   state.activeChatPeer = null;
+  state.activeGroupName = '';
+  state.activeGroupMembers = [];
   state.chatMessages = [];
+  state.chatLastMessageId = 0;
   state.peerTyping = false;
+  state.directOtherReadId = 0;
+  state.directOtherReadAt = null;
   elements.chatRoom.hidden = true;
   document.getElementById('chatView')?.classList.remove('is-room-open');
   startChatPolling();
 }
 
 async function setTypingState(active) {
-  if (!state.activeThreadId || !state.sessionToken) return;
-  await rpc('chat_set_typing', { p_session_token: state.sessionToken, p_thread_id: state.activeThreadId, p_typing: Boolean(active) });
+  const roomId = activeChatRoomId();
+  if (!roomId || !state.sessionToken) return;
+  if (state.activeChatType === 'group') {
+    await rpc('group_set_typing', { p_session_token: state.sessionToken, p_group_id: roomId, p_typing: Boolean(active) });
+  } else {
+    await rpc('chat_set_typing', { p_session_token: state.sessionToken, p_thread_id: roomId, p_typing: Boolean(active) });
+  }
 }
 
 function handleChatTyping() {
-  if (!state.activeThreadId || state.chatBlocked) return;
+  if (!activeChatRoomId() || state.chatBlocked) return;
   const active = Boolean(String(elements.chatInput.value || '').trim());
   const now = Date.now();
   if (!active) { setTypingState(false).catch(() => {}); return; }
-  if (now - state.lastTypingPingAt < 1800) return;
+  if (now - state.lastTypingPingAt < 1700) return;
   state.lastTypingPingAt = now;
   setTypingState(true).catch(() => {});
-}
-
-async function refreshPeerTyping() {
-  if (!state.activeThreadId) { state.peerTyping=false; return; }
-  try {
-    const row = firstRow(await rpc('chat_get_typing', { p_session_token: state.sessionToken, p_thread_id: state.activeThreadId }));
-    state.peerTyping = Boolean(row?.typing);
-  } catch { state.peerTyping = false; }
 }
 
 async function startChatFromFriend() {
@@ -1087,6 +1146,108 @@ async function startChatFromFriend() {
     await openChatWithStudent(state.selectedClassmateNo);
     switchView('chat');
     startChatPolling();
+  } catch (error) { showToast(humanizeError(error), true); }
+}
+
+function openGroupCreateModal() {
+  state.groupSelectedInvitees = new Set();
+  elements.groupNameInput.value = '';
+  elements.groupMemberSearch.value = '';
+  elements.groupMemberSearchResults.replaceChildren();
+  elements.groupSelectedMembers.replaceChildren();
+  elements.groupCreateModal.hidden = false;
+  setTimeout(() => elements.groupNameInput?.focus(), 50);
+}
+
+function closeGroupCreateModal() {
+  elements.groupCreateModal.hidden = true;
+  state.groupSelectedInvitees = new Set();
+}
+
+function renderSelectedGroupMembers() {
+  elements.groupSelectedMembers.replaceChildren();
+  for (const studentNo of state.groupSelectedInvitees) {
+    const person = state.roster.find((row) => String(row.studentNo) === String(studentNo));
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'group-selected-chip';
+    chip.textContent = `${person?.name || studentNo} ×`;
+    chip.addEventListener('click', () => {
+      state.groupSelectedInvitees.delete(String(studentNo));
+      renderSelectedGroupMembers();
+      renderGroupCreateSearch();
+    });
+    elements.groupSelectedMembers.appendChild(chip);
+  }
+}
+
+function renderGroupCreateSearch() {
+  const query = String(elements.groupMemberSearch.value || '').trim();
+  elements.groupMemberSearchResults.replaceChildren();
+  if (!query) return;
+  const results = searchRosterStudents(state.roster, query, state.profile?.student_no || '').filter((row) => row.registered);
+  for (const result of results.slice(0, 20)) {
+    const selected = state.groupSelectedInvitees.has(String(result.studentNo));
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `group-member-search-item${selected ? ' is-selected' : ''}`;
+    const strong = document.createElement('strong'); strong.textContent = result.name;
+    const span = document.createElement('span'); span.textContent = selected ? '선택됨' : result.studentNo;
+    button.append(strong, span);
+    button.addEventListener('click', () => {
+      if (selected) state.groupSelectedInvitees.delete(String(result.studentNo));
+      else state.groupSelectedInvitees.add(String(result.studentNo));
+      renderSelectedGroupMembers();
+      renderGroupCreateSearch();
+    });
+    elements.groupMemberSearchResults.appendChild(button);
+  }
+}
+
+async function createGroupChat() {
+  const name = String(elements.groupNameInput.value || '').trim();
+  if (!name) { showToast('단체채팅방 이름을 입력해주세요.', true); return; }
+  const invitees = Array.from(state.groupSelectedInvitees);
+  setButtonLoading(elements.groupCreateConfirmBtn, true, '만드는 중...');
+  try {
+    const row = firstRow(await rpc('group_create_with_invites', {
+      p_session_token: state.sessionToken,
+      p_name: name,
+      p_invitees: invitees,
+    }));
+    closeGroupCreateModal();
+    await loadChatThreads(true);
+    if (row?.group_id) await openGroupChat({ group_id: row.group_id, group_name: row.group_name || name });
+  } catch (error) { showToast(humanizeError(error), true); }
+  finally { setButtonLoading(elements.groupCreateConfirmBtn, false); }
+}
+
+function renderGroupInvites() {
+  elements.groupInviteInbox.replaceChildren();
+  elements.groupInviteInbox.hidden = !state.groupInvites.length;
+  for (const invite of state.groupInvites) {
+    const card = document.createElement('div');
+    card.className = 'group-invite-card';
+    const info = document.createElement('div');
+    const strong = document.createElement('strong'); strong.textContent = `${invite.inviter_name}님이 '${invite.group_name}'에 초대했어요`;
+    const small = document.createElement('span'); small.textContent = `현재 ${Number(invite.member_count || 1)}명 · 초대를 수락해야 입장합니다.`;
+    info.append(strong, small);
+    const actions = document.createElement('div'); actions.className = 'group-invite-actions';
+    const accept = document.createElement('button'); accept.type='button'; accept.className='accept'; accept.textContent='수락';
+    const decline = document.createElement('button'); decline.type='button'; decline.className='decline'; decline.textContent='거절';
+    accept.addEventListener('click', () => respondGroupInvite(invite, true));
+    decline.addEventListener('click', () => respondGroupInvite(invite, false));
+    actions.append(decline, accept);
+    card.append(info, actions);
+    elements.groupInviteInbox.appendChild(card);
+  }
+}
+
+async function respondGroupInvite(invite, accept) {
+  try {
+    await rpc('group_respond_invite', { p_session_token: state.sessionToken, p_invite_id: Number(invite.invite_id), p_accept: Boolean(accept) });
+    await loadChatThreads(true);
+    if (accept) await openGroupChat({ group_id: invite.group_id, group_name: invite.group_name });
   } catch (error) { showToast(humanizeError(error), true); }
 }
 
@@ -1106,38 +1267,65 @@ function stopChatPolling() {
 
 function startChatPolling() {
   stopChatPolling();
-  state.chatThreadTimer = setInterval(() => loadChatThreads(true), 5000);
-  if (state.activeThreadId) state.chatRoomTimer = setInterval(() => loadChatMessages(true), 3000);
+  state.chatThreadTimer = setInterval(() => loadChatThreads(true), 6500);
+  if (activeChatRoomId()) state.chatRoomTimer = setInterval(() => loadChatMessages(true, false), 1500);
 }
 
 async function loadChatThreads(silent = false) {
   if (!state.sessionToken || !state.profile?.registered) return;
   try {
-    const data = await rpc('chat_list_threads_v2', { p_session_token: state.sessionToken });
-    state.chatThreads = Array.isArray(data) ? data : [];
+    const [directRows, groupRows, inviteRows] = await Promise.all([
+      rpc('chat_list_threads_v2', { p_session_token: state.sessionToken }),
+      rpc('group_list_rooms', { p_session_token: state.sessionToken }),
+      rpc('group_list_invites', { p_session_token: state.sessionToken }),
+    ]);
+    const directs = (Array.isArray(directRows) ? directRows : []).map((row) => ({ ...row, room_type: 'direct' }));
+    state.groupRooms = (Array.isArray(groupRows) ? groupRows : []).map((row) => ({ ...row, room_type: 'group' }));
+    state.groupInvites = Array.isArray(inviteRows) ? inviteRows : [];
+    if (state.activeChatType === 'group' && state.activeGroupId) {
+      const activeRoom = state.groupRooms.find((row) => Number(row.group_id) === Number(state.activeGroupId));
+      if (activeRoom && String(activeRoom.group_name) !== state.activeGroupName) {
+        state.activeGroupName = String(activeRoom.group_name);
+        if (!elements.chatRoom.hidden) {
+          elements.chatPeerTitle.textContent = state.activeGroupName;
+          if (!elements.groupInfoModal.hidden) elements.groupRenameInput.value = state.activeGroupName;
+        }
+      }
+    }
+    state.chatThreads = [...directs, ...state.groupRooms].sort((a,b) => {
+      const at = new Date(a.last_message_at || 0).getTime();
+      const bt = new Date(b.last_message_at || 0).getTime();
+      return bt - at;
+    });
+    renderGroupInvites();
     renderChatThreads();
   } catch (error) { if (!silent) showToast(humanizeError(error), true); }
 }
 
 function renderChatThreads() {
   elements.chatThreadList.replaceChildren();
-  const totalUnread = state.chatThreads.reduce((sum, row) => sum + Number(row.unread_count || 0), 0);
+  const totalUnread = state.chatThreads.reduce((sum, row) => sum + Number(row.unread_count || 0), 0) + state.groupInvites.length;
   elements.chatNavUnread.textContent = String(totalUnread);
   elements.chatNavUnread.hidden = totalUnread <= 0;
   if (!state.chatThreads.length) {
-    elements.chatThreadList.appendChild(createEmptyState('아직 대화가 없습니다. 같이 듣는 친구에서 채팅을 시작해보세요.'));
+    elements.chatThreadList.appendChild(createEmptyState('아직 대화가 없습니다. 친구를 검색하거나 단체채팅을 만들어보세요.'));
     return;
   }
   for (const row of state.chatThreads) {
+    const isGroup = row.room_type === 'group';
+    const roomId = Number(isGroup ? row.group_id : row.thread_id);
+    const isActive = state.activeChatType === row.room_type && roomId === activeChatRoomId();
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `chat-thread${Number(row.thread_id) === state.activeThreadId ? ' is-active' : ''}`;
-    const body = document.createElement('div');
-    body.className = 'chat-thread__body';
+    button.className = `chat-thread${isActive ? ' is-active' : ''}`;
+    const body = document.createElement('div'); body.className = 'chat-thread__body';
     const top = document.createElement('div'); top.className = 'chat-thread__top';
-    const name = document.createElement('strong'); name.textContent = `${row.other_name} (${row.other_student_no})`;
+    const name = document.createElement('strong');
+    const kind = document.createElement('span'); kind.className='chat-thread__kind'; kind.textContent = isGroup ? `단체 ${Number(row.member_count || 1)}명` : '1:1';
+    name.textContent = isGroup ? String(row.group_name) : `${row.other_name} (${row.other_student_no})`;
     const time = document.createElement('span'); time.textContent = formatChatListTime(row.last_message_at);
-    top.append(name,time);
+    const nameWrap = document.createElement('span'); nameWrap.append(kind,name);
+    top.append(nameWrap,time);
     const preview = document.createElement('span'); preview.className='chat-thread__preview'; preview.textContent = row.last_message || '대화를 시작해보세요.';
     body.append(top,preview);
     if (Number(row.unread_count || 0) > 0) {
@@ -1148,38 +1336,120 @@ function renderChatThreads() {
   }
 }
 
+function resetActiveMessageState() {
+  state.chatMessages = [];
+  state.chatLastMessageId = 0;
+  state.peerTyping = false;
+  state.directOtherReadId = 0;
+  state.directOtherReadAt = null;
+  clearPendingChatImage();
+}
+
 async function openChatWithStudent(studentNo) {
   const row = firstRow(await rpc('chat_start_or_open', { p_session_token: state.sessionToken, p_other_student_no: String(studentNo) }));
   if (!row) throw new Error('CHAT_NOT_FOUND');
+  state.activeChatType = 'direct';
+  state.activeGroupId = 0;
   state.activeThreadId = Number(row.thread_id);
   state.activeChatPeer = { studentNo: String(row.other_student_no), name: String(row.other_name) };
+  state.activeGroupName = '';
   state.chatBlocked = Boolean(row.blocked);
+  resetActiveMessageState();
   elements.chatRoom.hidden = false;
   document.getElementById('chatView')?.classList.add('is-room-open');
-  await loadChatMessages();
+  await loadChatMessages(false, true);
   await loadChatThreads(true);
   startChatPolling();
+  refocusChatInput();
 }
 
 async function openExistingChat(row) {
+  if (row.room_type === 'group') return openGroupChat(row);
+  state.activeChatType = 'direct';
+  state.activeGroupId = 0;
   state.activeThreadId = Number(row.thread_id);
   state.activeChatPeer = { studentNo: String(row.other_student_no), name: String(row.other_name) };
+  state.activeGroupName = '';
   state.chatBlocked = Boolean(row.blocked);
+  resetActiveMessageState();
   elements.chatRoom.hidden = false;
   document.getElementById('chatView')?.classList.add('is-room-open');
-  await loadChatMessages();
+  await loadChatMessages(false, true);
   startChatPolling();
+  refocusChatInput();
 }
 
-async function loadChatMessages(silent = false) {
-  if (!state.activeThreadId) return;
+async function openGroupChat(row) {
+  state.activeChatType = 'group';
+  state.activeThreadId = 0;
+  state.activeGroupId = Number(row.group_id);
+  state.activeChatPeer = null;
+  state.activeGroupName = String(row.group_name || '단체채팅');
+  state.chatBlocked = false;
+  resetActiveMessageState();
+  elements.chatRoom.hidden = false;
+  document.getElementById('chatView')?.classList.add('is-room-open');
+  await loadChatMessages(false, true);
+  startChatPolling();
+  refocusChatInput();
+}
+
+function formatGroupTyping(row) {
+  const count = Number(row?.typing_count || 0);
+  const names = Array.isArray(row?.typing_names) ? row.typing_names.filter(Boolean) : [];
+  if (!count) return '';
+  if (count === 1) return `${names[0] || '친구'}님이 입력 중...`;
+  if (count <= 3) return `${names.join(', ')}님이 입력 중...`;
+  return `${names.join(', ')} 외 ${count - names.length}명이 입력 중...`;
+}
+
+async function loadChatMessages(silent = false, reset = false) {
+  const roomId = activeChatRoomId();
+  if (!roomId) return;
+  const expectedType = state.activeChatType;
+  const expectedId = roomId;
+  if (reset) resetActiveMessageState();
+  const afterId = reset ? 0 : Number(state.chatLastMessageId || 0);
   try {
-    const data = await rpc('chat_list_messages_v2', { p_session_token: state.sessionToken, p_thread_id: state.activeThreadId });
-    state.chatMessages = Array.isArray(data) ? data : [];
-    if (state.chatMessages.length) state.chatBlocked = Boolean(state.chatMessages[0].blocked);
-    await refreshPeerTyping();
-    renderChatRoom();
-    await rpc('chat_mark_read', { p_session_token: state.sessionToken, p_thread_id: state.activeThreadId });
+    let rows = [];
+    let statusChanged = false;
+    if (expectedType === 'group') {
+      const [data, typingRows] = await Promise.all([
+        rpc('group_list_messages', { p_session_token: state.sessionToken, p_group_id: expectedId, p_after_id: afterId, p_limit: 80 }),
+        rpc('group_get_typing', { p_session_token: state.sessionToken, p_group_id: expectedId }),
+      ]);
+      rows = Array.isArray(data) ? data : [];
+      const typingText = formatGroupTyping(firstRow(typingRows));
+      statusChanged = typingText !== (state.peerTyping || '');
+      state.peerTyping = typingText;
+    } else {
+      const [data, threadStateRows] = await Promise.all([
+        rpc('chat_list_messages_v3', { p_session_token: state.sessionToken, p_thread_id: expectedId, p_after_id: afterId, p_limit: 80 }),
+        rpc('chat_get_thread_state', { p_session_token: state.sessionToken, p_thread_id: expectedId }),
+      ]);
+      rows = Array.isArray(data) ? data : [];
+      const threadState = firstRow(threadStateRows) || {};
+      const nextTyping = Boolean(threadState.typing);
+      const nextReadId = Number(threadState.other_last_read_message_id || 0);
+      const nextReadAt = threadState.other_last_read_at || null;
+      statusChanged = nextTyping !== Boolean(state.peerTyping) || nextReadId !== state.directOtherReadId || nextReadAt !== state.directOtherReadAt || Boolean(threadState.blocked) !== state.chatBlocked;
+      state.peerTyping = nextTyping;
+      state.directOtherReadId = nextReadId;
+      state.directOtherReadAt = nextReadAt;
+      state.chatBlocked = Boolean(threadState.blocked);
+    }
+
+    if (state.activeChatType !== expectedType || activeChatRoomId() !== expectedId) return;
+    if (reset) state.chatMessages = rows;
+    else if (rows.length) {
+      const seen = new Set(state.chatMessages.map((m) => Number(m.id)));
+      for (const row of rows) if (!seen.has(Number(row.id))) state.chatMessages.push(row);
+    }
+    state.chatLastMessageId = Number(state.chatMessages.at(-1)?.id || 0);
+
+    if (reset || rows.length || statusChanged) renderChatRoom();
+    if (expectedType === 'group') await rpc('group_mark_read', { p_session_token: state.sessionToken, p_group_id: expectedId });
+    else await rpc('chat_mark_read', { p_session_token: state.sessionToken, p_thread_id: expectedId });
     if (!silent) await loadChatThreads(true);
   } catch (error) { if (!silent) showToast(humanizeError(error), true); }
 }
@@ -1208,6 +1478,7 @@ function handleChatImageSelection() {
   elements.chatPhotoPreviewImage.src = url;
   elements.chatPhotoPreview.hidden = false;
   elements.chatPhotoPreviewImage.onload = () => URL.revokeObjectURL(url);
+  refocusChatInput();
 }
 
 async function chatMediaRequest(formOrBody, isForm = false) {
@@ -1230,9 +1501,12 @@ async function chatMediaRequest(formOrBody, isForm = false) {
 }
 
 async function uploadChatImage(file) {
+  const roomId = activeChatRoomId();
   const form = new FormData();
   form.append('action', 'upload');
-  form.append('thread_id', String(state.activeThreadId));
+  form.append('room_type', state.activeChatType);
+  form.append('room_id', String(roomId));
+  if (state.activeChatType === 'direct') form.append('thread_id', String(roomId));
   form.append('file', file, file.name || 'photo');
   const response = await chatMediaRequest(form, true);
   const data = await response.json();
@@ -1253,16 +1527,16 @@ function scrollChatToBottom() {
 }
 
 async function loadChatImage(imagePath, img) {
-  if (!imagePath || !img || !state.activeThreadId) return;
+  if (!imagePath || !img || !activeChatRoomId()) return;
   const cached = state.chatImageUrls.get(imagePath);
-  if (cached) {
-    img.src = cached;
-    return;
-  }
+  if (cached) { img.src = cached; return; }
   try {
+    const roomId = activeChatRoomId();
     const response = await chatMediaRequest({
       action: 'signed_url',
-      thread_id: state.activeThreadId,
+      room_type: state.activeChatType,
+      room_id: roomId,
+      thread_id: state.activeChatType === 'direct' ? roomId : undefined,
       path: imagePath,
     });
     const data = await response.json();
@@ -1294,17 +1568,26 @@ function closeChatImageLightbox() {
 }
 
 function renderChatRoom() {
-  if (!state.activeChatPeer) return;
+  const isGroup = state.activeChatType === 'group';
+  if (!isGroup && !state.activeChatPeer) return;
   const stickToBottom = isChatNearBottom();
-  elements.chatPeerTitle.textContent = `${state.activeChatPeer.name} (${state.activeChatPeer.studentNo})`;
+  elements.chatRoomKind.textContent = isGroup ? '단체채팅' : '1:1 채팅';
+  elements.chatPeerTitle.textContent = isGroup ? state.activeGroupName : `${state.activeChatPeer.name} (${state.activeChatPeer.studentNo})`;
+  elements.chatRoomInfoBtn.disabled = !isGroup;
+  elements.chatReadStatus.textContent = isGroup
+    ? String(state.peerTyping || '')
+    : (state.peerTyping ? '입력 중...' : formatRelativeReadAt(state.directOtherReadAt));
+  elements.chatReadStatus.classList.toggle('is-typing', Boolean(state.peerTyping));
   elements.chatMessages.replaceChildren();
-  const otherReadId = Number(state.chatMessages.at(-1)?.other_last_read_message_id || 0);
-  const otherReadAt = state.chatMessages.at(-1)?.other_last_read_at || null;
-  elements.chatReadStatus.textContent = state.peerTyping ? '입력 중...' : formatRelativeReadAt(otherReadAt);
-  elements.chatReadStatus.classList.toggle('is-typing', state.peerTyping);
+
+  let previousSender = '';
   for (const message of state.chatMessages) {
     const mine = String(message.sender_student_no) === String(state.profile.student_no);
     const row = document.createElement('div'); row.className = `chat-message-row ${mine ? 'is-mine' : 'is-other'}`;
+    if (isGroup && !mine && String(message.sender_student_no) !== previousSender) {
+      const sender = document.createElement('div'); sender.className='group-sender-name'; sender.textContent = message.sender_name || message.sender_student_no;
+      row.appendChild(sender);
+    }
     const bubble = document.createElement('div'); bubble.className='chat-bubble';
     if (message.image_path) {
       bubble.classList.add('has-image');
@@ -1315,59 +1598,147 @@ function renderChatRoom() {
       image.dataset.stickToBottom = stickToBottom ? '1' : '0';
       image.addEventListener('load', () => {
         image.classList.add('is-loaded');
-        if (image.dataset.stickToBottom === '1') {
-          requestAnimationFrame(scrollChatToBottom);
-        }
+        if (image.dataset.stickToBottom === '1') requestAnimationFrame(scrollChatToBottom);
       }, { once: true });
       image.addEventListener('click', () => { if (image.src) openChatImageLightbox(image.src); });
       bubble.appendChild(image);
       loadChatImage(String(message.image_path), image);
     }
     if (String(message.body || '').trim()) {
-      const text = document.createElement('div');
-      text.className = 'chat-bubble-text';
-      text.textContent = message.body;
-      bubble.appendChild(text);
+      const text = document.createElement('div'); text.className = 'chat-bubble-text'; text.textContent = message.body; bubble.appendChild(text);
     }
     const meta = document.createElement('div'); meta.className='chat-message-meta';
     const time = document.createElement('span'); time.textContent = new Intl.DateTimeFormat('ko-KR',{hour:'2-digit',minute:'2-digit'}).format(new Date(message.created_at));
     meta.appendChild(time);
-    if (isChatMessageUnread(message, otherReadId, state.profile.student_no)) { const unread=document.createElement('span'); unread.className='chat-message-unread'; unread.textContent='1'; meta.prepend(unread); }
-    row.append(bubble,meta); elements.chatMessages.appendChild(row);
+    if (isGroup && mine && Number(message.read_count || 0) > 0) {
+      const read = document.createElement('span'); read.className='group-read-count'; read.textContent=`${Number(message.read_count)}명 읽음`; meta.prepend(read);
+    } else if (!isGroup && isChatMessageUnread(message, state.directOtherReadId, state.profile.student_no)) {
+      const unread=document.createElement('span'); unread.className='chat-message-unread'; unread.textContent='1'; meta.prepend(unread);
+    }
+    row.append(bubble,meta);
+    elements.chatMessages.appendChild(row);
+    previousSender = String(message.sender_student_no || '');
   }
-  elements.chatBlockNotice.hidden = !state.chatBlocked;
-  elements.chatInput.disabled = state.chatBlocked;
-  elements.chatSendBtn.disabled = state.chatBlocked;
-  if (elements.chatPhotoBtn) elements.chatPhotoBtn.disabled = state.chatBlocked;
-  elements.chatBlockBtn.textContent = state.chatBlocked ? '차단 해제' : '차단';
+
+  elements.chatBlockNotice.hidden = isGroup || !state.chatBlocked;
+  elements.chatInput.disabled = !isGroup && state.chatBlocked;
+  elements.chatSendBtn.disabled = !isGroup && state.chatBlocked;
+  if (elements.chatPhotoBtn) elements.chatPhotoBtn.disabled = !isGroup && state.chatBlocked;
+  elements.chatBlockBtn.hidden = isGroup;
+  elements.chatReportBtn.hidden = isGroup;
+  if (!isGroup) elements.chatBlockBtn.textContent = state.chatBlocked ? '차단 해제' : '차단';
   if (stickToBottom) requestAnimationFrame(scrollChatToBottom);
+}
+
+function refocusChatInput() {
+  if (!elements.chatInput || elements.chatInput.disabled) return;
+  requestAnimationFrame(() => {
+    try { elements.chatInput.focus({ preventScroll: true }); }
+    catch { elements.chatInput.focus(); }
+    setTimeout(() => {
+      if (document.activeElement !== elements.chatInput) {
+        try { elements.chatInput.focus({ preventScroll: true }); } catch { elements.chatInput.focus(); }
+      }
+    }, 60);
+  });
 }
 
 async function sendChatMessage() {
   const body = String(elements.chatInput.value || '').trim();
   const imageFile = state.pendingChatImage;
-  if (!state.activeThreadId || (!body && !imageFile)) return;
+  const roomId = activeChatRoomId();
+  if (!roomId || (!body && !imageFile)) return;
   if (body.length > 500) { showToast('메시지는 최대 500자입니다.', true); return; }
   setButtonLoading(elements.chatSendBtn,true,'전송 중...');
   try {
     let imagePath = null;
     if (imageFile) imagePath = await uploadChatImage(imageFile);
-    await rpc('chat_send_message_v2', {
-      p_session_token: state.sessionToken,
-      p_thread_id: state.activeThreadId,
-      p_body: body,
-      p_image_path: imagePath,
-    });
+    if (state.activeChatType === 'group') {
+      await rpc('group_send_message', { p_session_token: state.sessionToken, p_group_id: roomId, p_body: body, p_image_path: imagePath });
+    } else {
+      await rpc('chat_send_message_v2', { p_session_token: state.sessionToken, p_thread_id: roomId, p_body: body, p_image_path: imagePath });
+    }
     elements.chatInput.value='';
     clearPendingChatImage();
     await setTypingState(false).catch(() => {});
-    await loadChatMessages();
+    await loadChatMessages(true, false);
+    loadChatThreads(true).catch(() => {});
   } catch(error){ showToast(humanizeError(error),true); }
-  finally { setButtonLoading(elements.chatSendBtn,false); if(state.chatBlocked) elements.chatSendBtn.disabled=true; }
+  finally {
+    setButtonLoading(elements.chatSendBtn,false);
+    if(state.activeChatType === 'direct' && state.chatBlocked) elements.chatSendBtn.disabled=true;
+    refocusChatInput();
+  }
+}
+
+async function openGroupInfoModal() {
+  if (state.activeChatType !== 'group' || !state.activeGroupId) return;
+  try {
+    const [roomRows, memberRows] = await Promise.all([
+      rpc('group_get_room', { p_session_token: state.sessionToken, p_group_id: state.activeGroupId }),
+      rpc('group_list_members', { p_session_token: state.sessionToken, p_group_id: state.activeGroupId }),
+    ]);
+    const room = firstRow(roomRows) || {};
+    state.activeGroupName = String(room.group_name || state.activeGroupName);
+    state.activeGroupMembers = Array.isArray(memberRows) ? memberRows : [];
+    elements.groupRenameInput.value = state.activeGroupName;
+    elements.groupMemberList.replaceChildren();
+    for (const member of state.activeGroupMembers) {
+      const row = document.createElement('div'); row.className='group-member-row';
+      const strong = document.createElement('strong'); strong.textContent=member.name;
+      const span = document.createElement('span'); span.textContent=String(member.student_no) === String(state.profile.student_no) ? '나' : member.student_no;
+      row.append(strong,span); elements.groupMemberList.appendChild(row);
+    }
+    elements.groupInviteSearch.value='';
+    elements.groupInviteSearchResults.replaceChildren();
+    elements.groupInfoModal.hidden=false;
+  } catch (error) { showToast(humanizeError(error), true); }
+}
+
+function closeGroupInfoModal() { elements.groupInfoModal.hidden=true; }
+
+async function renameActiveGroup() {
+  const name=String(elements.groupRenameInput.value||'').trim();
+  if (!name || !state.activeGroupId) return;
+  try {
+    const result=await rpc('group_rename',{p_session_token:state.sessionToken,p_group_id:state.activeGroupId,p_name:name});
+    state.activeGroupName=typeof result==='string'?result:name;
+    renderChatRoom();
+    await loadChatThreads(true);
+    showToast('채팅방 이름을 변경했습니다.');
+  } catch(error){ showToast(humanizeError(error),true); }
+}
+
+function renderGroupInviteSearch() {
+  const query=String(elements.groupInviteSearch.value||'').trim();
+  elements.groupInviteSearchResults.replaceChildren();
+  if(!query)return;
+  const memberNos=new Set(state.activeGroupMembers.map((m)=>String(m.student_no)));
+  const results=searchRosterStudents(state.roster,query,state.profile?.student_no||'').filter((row)=>row.registered&&!memberNos.has(String(row.studentNo)));
+  for(const result of results.slice(0,20)){
+    const button=document.createElement('button');button.type='button';button.className='group-member-search-item';
+    const strong=document.createElement('strong');strong.textContent=result.name;
+    const span=document.createElement('span');span.textContent='초대';
+    button.append(strong,span);
+    button.addEventListener('click',async()=>{
+      try{await rpc('group_invite_student',{p_session_token:state.sessionToken,p_group_id:state.activeGroupId,p_student_no:String(result.studentNo)});showToast(`${result.name}님에게 초대장을 보냈습니다.`);elements.groupInviteSearch.value='';renderGroupInviteSearch();}
+      catch(error){showToast(humanizeError(error),true);}
+    });
+    elements.groupInviteSearchResults.appendChild(button);
+  }
+}
+
+async function leaveActiveGroup() {
+  if(!state.activeGroupId)return;
+  if(!window.confirm(`'${state.activeGroupName}' 채팅방에서 나갈까요?`))return;
+  try{
+    await rpc('group_leave',{p_session_token:state.sessionToken,p_group_id:state.activeGroupId});
+    closeGroupInfoModal();closeChatRoom();await loadChatThreads(true);showToast('채팅방에서 나왔습니다.');
+  }catch(error){showToast(humanizeError(error),true);}
 }
 
 async function toggleChatBlock() {
-  if (!state.activeChatPeer) return;
+  if (state.activeChatType !== 'direct' || !state.activeChatPeer) return;
   const wasBlocked = state.chatBlocked;
   try {
     await rpc(wasBlocked ? 'chat_unblock_student' : 'chat_block_student',{p_session_token:state.sessionToken,p_other_student_no:state.activeChatPeer.studentNo});
@@ -1378,7 +1749,7 @@ async function toggleChatBlock() {
 }
 
 async function reportChatUser() {
-  if (!state.activeThreadId || !state.activeChatPeer) return;
+  if (state.activeChatType !== 'direct' || !state.activeThreadId || !state.activeChatPeer) return;
   const reason = window.prompt(`${state.activeChatPeer.name}님을 신고하는 이유를 입력해주세요.`, '부적절한 메시지');
   if (!reason?.trim()) return;
   try {
@@ -1386,6 +1757,7 @@ async function reportChatUser() {
     showToast('신고가 접수됐습니다. 상대방에게는 신고 사실이 표시되지 않습니다.');
   } catch(error){ showToast(humanizeError(error),true); }
 }
+
 
 function switchView(viewName) {
   document.querySelectorAll('[data-view]').forEach((view) => { view.hidden = view.dataset.view !== viewName; });
