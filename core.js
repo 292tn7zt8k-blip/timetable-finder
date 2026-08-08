@@ -112,6 +112,12 @@ export function findClassmatesForCell(students, subjectsById, studentNo, day, pe
   };
 }
 
+
+function isExcludedFromClassmateMatching(subjectsById, subjectId) {
+  const name = String(subjectName(subjectsById, subjectId) || '').trim();
+  return name === '창체';
+}
+
 export function findMyClassmatesBySubject(students, subjectsById, studentNo) {
   const targetNo = String(studentNo ?? '').trim();
   const all = Array.isArray(students) ? students : [];
@@ -124,7 +130,7 @@ export function findMyClassmatesBySubject(students, subjectsById, studentNo) {
   for (const day of DAYS) {
     PERIODS.forEach((period, index) => {
       const subjectId = mySchedule[day][index];
-      if (subjectId === FREE_SUBJECT_ID || subjectId === UNKNOWN_SUBJECT_ID) return;
+      if (subjectId === FREE_SUBJECT_ID || subjectId === UNKNOWN_SUBJECT_ID || isExcludedFromClassmateMatching(subjectsById, subjectId)) return;
 
       if (!groups.has(subjectId)) {
         groups.set(subjectId, {
@@ -178,7 +184,7 @@ export function findSharedClassesWithStudent(students, subjectsById, myStudentNo
   for (const day of DAYS) {
     PERIODS.forEach((period, index) => {
       const subjectId = mine[day][index];
-      if (subjectId === FREE_SUBJECT_ID || subjectId === UNKNOWN_SUBJECT_ID) return;
+      if (subjectId === FREE_SUBJECT_ID || subjectId === UNKNOWN_SUBJECT_ID || isExcludedFromClassmateMatching(subjectsById, subjectId)) return;
       if (theirs[day][index] !== subjectId) return;
       if (!groups.has(subjectId)) {
         groups.set(subjectId, {
