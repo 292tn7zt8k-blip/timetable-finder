@@ -20,7 +20,7 @@ import {
   formatRelativeReadAt,
   formatChatListTime,
   isChatMessageUnread,
-} from './core.js?v=20260808-1730';
+} from './core.js?v=20260808-1900';
 
 const SESSION_KEY = 'timetableSessionToken';
 const COOLDOWN_MS = 10 * 60 * 1000;
@@ -85,6 +85,14 @@ const elements = {
   chatSearch: document.getElementById('chatSearch'),
   chatSearchResults: document.getElementById('chatSearchResults'),
   chatBackBtn: document.getElementById('chatBackBtn'),
+  chatPhotoBtn: document.getElementById('chatPhotoBtn'),
+  chatImageInput: document.getElementById('chatImageInput'),
+  chatPhotoPreview: document.getElementById('chatPhotoPreview'),
+  chatPhotoPreviewImage: document.getElementById('chatPhotoPreviewImage'),
+  chatPhotoRemoveBtn: document.getElementById('chatPhotoRemoveBtn'),
+  chatImageLightbox: document.getElementById('chatImageLightbox'),
+  chatImageLightboxImage: document.getElementById('chatImageLightboxImage'),
+  chatImageLightboxClose: document.getElementById('chatImageLightboxClose'),
   toast: document.getElementById('toast'),
 };
 
@@ -114,6 +122,8 @@ const state = {
   chatRoomTimer: null,
   peerTyping: false,
   lastTypingPingAt: 0,
+  pendingChatImage: null,
+  chatImageUrls: new Map(),
 };
 
 fillSelect(elements.lookupDay, DAYS, (day) => `${day}요일`);
@@ -195,6 +205,11 @@ function bindEvents() {
   elements.chatSearch?.addEventListener('input', renderChatSearchResults);
   elements.chatBackBtn?.addEventListener('click', closeChatRoom);
   elements.chatInput?.addEventListener('input', handleChatTyping);
+  elements.chatPhotoBtn?.addEventListener('click', () => { if (!state.chatBlocked) elements.chatImageInput?.click(); });
+  elements.chatImageInput?.addEventListener('change', handleChatImageSelection);
+  elements.chatPhotoRemoveBtn?.addEventListener('click', clearPendingChatImage);
+  elements.chatImageLightboxClose?.addEventListener('click', closeChatImageLightbox);
+  elements.chatImageLightbox?.addEventListener('click', (event) => { if (event.target === elements.chatImageLightbox) closeChatImageLightbox(); });
   elements.friendFullScheduleBtn.addEventListener('click', () => {
     if (!state.selectedClassmateNo) return;
     const targetNo = state.selectedClassmateNo;
@@ -1098,7 +1113,7 @@ function startChatPolling() {
 async function loadChatThreads(silent = false) {
   if (!state.sessionToken || !state.profile?.registered) return;
   try {
-    const data = await rpc('chat_list_threads', { p_session_token: state.sessionToken });
+    const data = await rpc('chat_list_threads_v2', { p_session_token: state.sessionToken });
     state.chatThreads = Array.isArray(data) ? data : [];
     renderChatThreads();
   } catch (error) { if (!silent) showToast(humanizeError(error), true); }
@@ -1159,7 +1174,7 @@ async function openExistingChat(row) {
 async function loadChatMessages(silent = false) {
   if (!state.activeThreadId) return;
   try {
-    const data = await rpc('chat_list_messages', { p_session_token: state.sessionToken, p_thread_id: state.activeThreadId });
+    const data = await rpc('chat_list_messages_v2', { p_session_token: state.sessionToken, p_thread_id: state.activeThreadId });
     state.chatMessages = Array.isArray(data) ? data : [];
     if (state.chatMessages.length) state.chatBlocked = Boolean(state.chatMessages[0].blocked);
     await refreshPeerTyping();
@@ -1167,6 +1182,92 @@ async function loadChatMessages(silent = false) {
     await rpc('chat_mark_read', { p_session_token: state.sessionToken, p_thread_id: state.activeThreadId });
     if (!silent) await loadChatThreads(true);
   } catch (error) { if (!silent) showToast(humanizeError(error), true); }
+}
+
+function clearPendingChatImage() {
+  state.pendingChatImage = null;
+  if (elements.chatImageInput) elements.chatImageInput.value = '';
+  if (elements.chatPhotoPreviewImage) elements.chatPhotoPreviewImage.removeAttribute('src');
+  if (elements.chatPhotoPreview) elements.chatPhotoPreview.hidden = true;
+}
+
+function handleChatImageSelection() {
+  const file = elements.chatImageInput?.files?.[0] || null;
+  if (!file) return clearPendingChatImage();
+  const allowed = new Set(['image/jpeg','image/png','image/webp']);
+  if (!allowed.has(file.type)) {
+    showToast('JPG, PNG, WEBP 사진만 보낼 수 있습니다.', true);
+    return clearPendingChatImage();
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    showToast('사진은 최대 5MB까지 보낼 수 있습니다.', true);
+    return clearPendingChatImage();
+  }
+  state.pendingChatImage = file;
+  const url = URL.createObjectURL(file);
+  elements.chatPhotoPreviewImage.src = url;
+  elements.chatPhotoPreview.hidden = false;
+  elements.chatPhotoPreviewImage.onload = () => URL.revokeObjectURL(url);
+}
+
+async function chatMediaRequest(formOrBody, isForm = false) {
+  const response = await fetch(`${config.url}/functions/v1/chat-media`, {
+    method: 'POST',
+    headers: {
+      apikey: config.publishableKey,
+      'x-timetable-session': state.sessionToken,
+      ...(isForm ? {} : { 'Content-Type': 'application/json' }),
+    },
+    body: isForm ? formOrBody : JSON.stringify(formOrBody),
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try { message = (await response.json())?.error || message; } catch {}
+    throw new Error(message);
+  }
+  return response;
+}
+
+async function uploadChatImage(file) {
+  const form = new FormData();
+  form.append('action', 'upload');
+  form.append('thread_id', String(state.activeThreadId));
+  form.append('file', file, file.name || 'photo');
+  const response = await chatMediaRequest(form, true);
+  const data = await response.json();
+  if (!data?.path) throw new Error('CHAT_IMAGE_UPLOAD_FAILED');
+  return String(data.path);
+}
+
+async function loadChatImage(imagePath, img) {
+  if (!imagePath || !img) return;
+  const cached = state.chatImageUrls.get(imagePath);
+  if (cached) { img.src = cached; return; }
+  try {
+    const response = await chatMediaRequest({ action:'download', thread_id:state.activeThreadId, path:imagePath });
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    state.chatImageUrls.set(imagePath, url);
+    img.src = url;
+  } catch {
+    img.alt = '사진을 불러오지 못했습니다.';
+    img.classList.add('is-error');
+  }
+}
+
+function openChatImageLightbox(src) {
+  if (!src || !elements.chatImageLightbox) return;
+  elements.chatImageLightboxImage.src = src;
+  elements.chatImageLightbox.hidden = false;
+  document.body.classList.add('is-lightbox-open');
+}
+
+function closeChatImageLightbox() {
+  if (!elements.chatImageLightbox) return;
+  elements.chatImageLightbox.hidden = true;
+  elements.chatImageLightboxImage.removeAttribute('src');
+  document.body.classList.remove('is-lightbox-open');
 }
 
 function renderChatRoom() {
@@ -1180,7 +1281,23 @@ function renderChatRoom() {
   for (const message of state.chatMessages) {
     const mine = String(message.sender_student_no) === String(state.profile.student_no);
     const row = document.createElement('div'); row.className = `chat-message-row ${mine ? 'is-mine' : 'is-other'}`;
-    const bubble = document.createElement('div'); bubble.className='chat-bubble'; bubble.textContent=message.body;
+    const bubble = document.createElement('div'); bubble.className='chat-bubble';
+    if (message.image_path) {
+      bubble.classList.add('has-image');
+      const image = document.createElement('img');
+      image.className = 'chat-image-message';
+      image.alt = '채팅으로 보낸 사진';
+      image.loading = 'lazy';
+      image.addEventListener('click', () => { if (image.src) openChatImageLightbox(image.src); });
+      bubble.appendChild(image);
+      loadChatImage(String(message.image_path), image);
+    }
+    if (String(message.body || '').trim()) {
+      const text = document.createElement('div');
+      text.className = 'chat-bubble-text';
+      text.textContent = message.body;
+      bubble.appendChild(text);
+    }
     const meta = document.createElement('div'); meta.className='chat-message-meta';
     const time = document.createElement('span'); time.textContent = new Intl.DateTimeFormat('ko-KR',{hour:'2-digit',minute:'2-digit'}).format(new Date(message.created_at));
     meta.appendChild(time);
@@ -1190,18 +1307,28 @@ function renderChatRoom() {
   elements.chatBlockNotice.hidden = !state.chatBlocked;
   elements.chatInput.disabled = state.chatBlocked;
   elements.chatSendBtn.disabled = state.chatBlocked;
+  if (elements.chatPhotoBtn) elements.chatPhotoBtn.disabled = state.chatBlocked;
   elements.chatBlockBtn.textContent = state.chatBlocked ? '차단 해제' : '차단';
   requestAnimationFrame(() => { elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight; });
 }
 
 async function sendChatMessage() {
   const body = String(elements.chatInput.value || '').trim();
-  if (!state.activeThreadId || !body) return;
+  const imageFile = state.pendingChatImage;
+  if (!state.activeThreadId || (!body && !imageFile)) return;
   if (body.length > 500) { showToast('메시지는 최대 500자입니다.', true); return; }
   setButtonLoading(elements.chatSendBtn,true,'전송 중...');
   try {
-    await rpc('chat_send_message',{p_session_token:state.sessionToken,p_thread_id:state.activeThreadId,p_body:body});
+    let imagePath = null;
+    if (imageFile) imagePath = await uploadChatImage(imageFile);
+    await rpc('chat_send_message_v2', {
+      p_session_token: state.sessionToken,
+      p_thread_id: state.activeThreadId,
+      p_body: body,
+      p_image_path: imagePath,
+    });
     elements.chatInput.value='';
+    clearPendingChatImage();
     await setTypingState(false).catch(() => {});
     await loadChatMessages();
   } catch(error){ showToast(humanizeError(error),true); }

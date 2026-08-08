@@ -1,24 +1,35 @@
 적용 순서
 
-1) Supabase SQL Editor
-   - supabase-classrooms-typing.sql 전체를 한 번 Run
+1. Supabase SQL Editor
+   - supabase-chat-photo-upgrade.sql 전체 Run
 
-2) Supabase Edge Functions > analyze-timetable
-   - 현재 index.ts 내용을 analyze-timetable-index.ts 전체 내용으로 교체 후 Deploy
-   - 기존 OPENAI_API_KEY 등 환경변수는 그대로 사용
+2. Supabase Edge Functions
+   - 새 함수 chat-media 생성
+   - edge-functions/chat-media/index.ts 전체 붙여넣기
+   - Deploy
 
-3) GitHub
+3. 기존 analyze-timetable Edge Function
+   - analyze-timetable-index.ts 내용으로 index.ts 전체 교체
+   - Deploy
+
+4. GitHub
    - index.html
    - style.css
    - app.js
    - core.js
-   위 4개를 기존 파일에 덮어쓰기
+   4개 덮어쓰기
+
+변경 사항
+- DM JPG/PNG/WEBP 사진 전송, 최대 5MB
+- 사진+텍스트 동시 전송
+- 사진 누르면 확대
+- 사진은 private Storage + 채팅 참가자 세션 검증 후에만 접근
+- 모바일 채팅방 상단 헤더 항상 화면 위 고정
+- 하단 입력창 항상 화면 아래 고정
+- 메시지 말풍선 폭 확대 및 한글 과도한 줄바꿈 수정
+- 교실은 과목 아래 작고 연한 회색으로 표시
+- 신규/재분석 시간표 원본 이미지를 private timetable-images 버킷에 보관
 
 주의
-- 기존 학생 schedule 데이터는 삭제/초기화하지 않습니다.
-- 기존 학생은 다시 시간표를 등록하지 않아도 됩니다.
-- 기존 학생의 교실은 빈값으로 시작하며, 새 AI 분석/수정 시부터 저장됩니다.
-- 교실 허용값: 201~208, 운동장, 정보교과실
-- 한 수업에 운동장/208처럼 복수 장소 저장 가능
-- 같이 듣는 친구 매칭에는 교실을 사용하지 않습니다.
-- 채팅 입력 중 표시는 최근 5초 내 입력 신호가 있을 때만 나타납니다.
+- 과거에 원본 시간표 이미지가 저장되지 않았던 학생의 교실은 자동 복원할 수 없음
+- 기존 시간표/채팅/PIN 데이터는 삭제하지 않음
