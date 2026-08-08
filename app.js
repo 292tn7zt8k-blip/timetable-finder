@@ -23,6 +23,27 @@ import {
 } from './core.js?v=20260808-2235';
 
 const SESSION_KEY = 'timetableSessionToken';
+const DEVICE_KEY = 'timetableDeviceId';
+
+function getDeviceId() {
+  let id = localStorage.getItem(DEVICE_KEY);
+
+  if (!id) {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+
+    id =
+      crypto.randomUUID() +
+      '-' +
+      Array.from(bytes)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+
+    localStorage.setItem(DEVICE_KEY, id);
+  }
+
+  return id;
+}
 const COOLDOWN_MS = 10 * 60 * 1000;
 
 const elements = {
@@ -183,6 +204,7 @@ async function rpc(name, params = {}) {
       apikey: config.publishableKey,
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      'x-device-id': getDeviceId(),
     },
     body: JSON.stringify(params),
     cache: 'no-store',
@@ -278,18 +300,51 @@ async function bootstrap() {
     renderAccessState();
     return;
   }
+
+  // 세션 자체가 유효한지 먼저 확인한다.
+  // 다른 초기 데이터 로딩 실패 때문에 정상 세션을 지우지 않는다.
   try {
     await loadProfile();
-    if (!state.profile) throw new Error('SESSION_EXPIRED');
-    await loadSubjects();
-    if (state.profile.registered) {
-      await refreshStudents();
-      await loadRosterStudents();
-      loadOwnScheduleIntoEditor();
+
+    if (!state.profile) {
+      clearSession();
+      renderAccessState();
+      return;
     }
-  } catch {
-    clearSession();
+  } catch (error) {
+    console.error('자동로그인 세션 확인 실패:', error);
+    renderAccessState();
+    return;
   }
+
+  renderAccessState();
+
+  try {
+    await loadSubjects();
+  } catch (error) {
+    console.error('과목 로딩 실패:', error);
+  }
+
+  if (state.profile?.registered) {
+    try {
+      await refreshStudents();
+    } catch (error) {
+      console.error('시간표 목록 로딩 실패:', error);
+    }
+
+    try {
+      await loadRosterStudents();
+    } catch (error) {
+      console.error('학생 목록 로딩 실패:', error);
+    }
+
+    try {
+      loadOwnScheduleIntoEditor();
+    } catch (error) {
+      console.error('내 시간표 표시 실패:', error);
+    }
+  }
+
   renderAccessState();
 }
 
